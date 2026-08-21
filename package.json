@@ -1,0 +1,13 @@
+{
+  "name": "not-alone-cafe-grouping",
+  "version": "0.1.0",
+  "description": "Live group-shuffling app for Not Alone Cafe events",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}

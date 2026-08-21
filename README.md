@@ -1,0 +1,67 @@
+# Not Alone Cafe — Live Grouping App
+
+Auto-balances attendees into equal-ish groups in real time, with an admin
+override for edge cases (e.g. 7 people needing 4+3 instead of four uneven
+groups).
+
+## Run it locally tonight
+
+```bash
+npm install
+npm start
+```
+
+Then open:
+- **Attendee page**: http://localhost:3000  (open this on your phone too, if
+  your phone is on the same wifi as your laptop — use your laptop's local IP
+  instead of localhost, e.g. http://192.168.1.23:3000)
+- **Admin page**: http://localhost:3000/admin.html?key=notalone2026
+
+**Change the admin key before the real event** — either edit `ADMIN_KEY` in
+`server.js` directly, or set an environment variable:
+
+```bash
+ADMIN_KEY=your-own-secret npm start
+```
+
+## How it works
+
+- Each attendee gets a random anonymous tag (e.g. "Fox-42") on connect — no
+  names, no accounts, nothing stored permanently.
+- They tap one of 4 objects. If that group is already at capacity, they're
+  auto-routed to whichever active group has the fewest people, and told so
+  ("Apple was full — you're with Fox!").
+- Capacity is recalculated live as `ceil(current headcount / active groups)`,
+  so it adapts as people trickle in throughout the event.
+- The admin page shows every group's live count and a full roster. Admin can:
+  - manually drag anyone into a different group (for cases the auto-balance
+    doesn't handle well, like your 7-person → 4+3 example)
+  - change how many groups are active (1–4) live, e.g. drop to 2 groups for a
+    smaller turnout
+  - reset everyone between events
+
+## Deploying for real (Render, same as your work backend)
+
+1. Push this folder to a GitHub repo
+2. On Render: New → Web Service → connect the repo
+3. Build command: `npm install`
+4. Start command: `npm start`
+5. Add environment variable `ADMIN_KEY` with your real secret
+6. Render gives you a `https://...onrender.com` URL — WebSocket (wss://) works
+   automatically over HTTPS, no extra config needed
+7. Print a QR code pointing at that URL for the event door
+
+## What's intentionally NOT in this version (v1 scope)
+
+- No database — state resets on server restart, which is fine for a
+  single-night event
+- No Unity, no 3D avatar, no shirt-color character movement — that's the
+  planned v2, once this core grouping mechanic is proven at a real event
+- No message wall / floating-text globe yet — same, planned as a later layer
+
+## Files
+
+- `server.js` — all server logic (WebSocket handling, group assignment, admin
+  commands)
+- `public/index.html` — attendee-facing mobile page
+- `public/admin.html` — admin dashboard

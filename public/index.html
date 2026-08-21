@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Not Alone Cafe — グループを選ぶ</title>
+<style>
+  :root {
+    --cream: #FBF7F0;
+    --sky: #8FC1DE;
+    --sky-deep: #5B9BC4;
+    --ink: #2B2B2B;
+    --coral: #E8746B;
+    --rainbow: linear-gradient(90deg, #F4A6A0, #F6D186, #A6D9B0, #93C7DE, #B7A6D9);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--cream);
+    font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 48px;
+  }
+  header { text-align: center; margin-bottom: 8px; }
+  .rainbow-bar { height: 4px; width: 64px; border-radius: 2px; background: var(--rainbow); margin: 0 auto 14px; }
+  h1 { font-size: 1.3rem; margin: 0 0 2px; letter-spacing: 0.02em; }
+  .sub { font-size: 0.85rem; color: #7a7a7a; margin-bottom: 28px; }
+
+  #stage { width: 100%; max-width: 420px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .obj-btn {
+    border: none;
+    border-radius: 20px;
+    background: white;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    padding: 22px 10px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    color: var(--ink);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  }
+  .obj-btn:active { transform: scale(0.96); }
+  .obj-btn .emoji { font-size: 2.4rem; }
+  .obj-btn .count { font-size: 0.75rem; color: #999; }
+  .obj-btn.full { opacity: 0.45; }
+  .obj-btn.inactive { display: none; }
+
+  #result {
+    display: none;
+    text-align: center;
+    background: white;
+    border-radius: 24px;
+    padding: 32px 20px;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.07);
+  }
+  #result .big-emoji { font-size: 3.2rem; margin-bottom: 6px; }
+  #result h2 { margin: 4px 0 2px; font-size: 1.15rem; }
+  #result .tag { color: var(--sky-deep); font-weight: 600; }
+  #result .note { margin-top: 10px; font-size: 0.85rem; color: #999; }
+  #result .members-count { margin-top: 18px; font-size: 0.85rem; color: #666; }
+  #result .members-count b { color: var(--ink); font-size: 1.1rem; }
+
+  .status { margin-top: 20px; font-size: 0.75rem; color: #b5b5b5; text-align: center; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="rainbow-bar"></div>
+    <h1>Not Alone Cafe</h1>
+    <div class="sub">好きなものをひとつタップして、グループに参加しよう</div>
+  </header>
+
+  <div id="stage">
+    <div class="grid" id="choices">
+      <button class="obj-btn" data-obj="apple"><span class="emoji">🍎</span>Apple<span class="count"></span></button>
+      <button class="obj-btn" data-obj="banana"><span class="emoji">🍌</span>Banana<span class="count"></span></button>
+      <button class="obj-btn" data-obj="fox"><span class="emoji">🦊</span>Fox<span class="count"></span></button>
+      <button class="obj-btn" data-obj="bear"><span class="emoji">🐻</span>Bear<span class="count"></span></button>
+    </div>
+
+    <div id="result">
+      <div class="big-emoji" id="resultEmoji">🎉</div>
+      <h2>ようこそ！</h2>
+      <div>あなたは <span class="tag" id="resultGroup">-</span> グループ</div>
+      <div class="note" id="reassignNote" style="display:none;">選んだグループが満員だったので、こちらに移動しました</div>
+      <div class="members-count">現在のメンバー: <b id="resultCount">-</b> 人</div>
+    </div>
+  </div>
+
+  <div class="status" id="status">接続中…</div>
+
+<script>
+  const statusEl = document.getElementById("status");
+  const choicesEl = document.getElementById("choices");
+  const resultEl = document.getElementById("result");
+
+  let token = sessionStorage.getItem("nac_token");
+  let myGroup = null;
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}`);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: "init", token }));
+  };
+
+  ws.onclose = () => { statusEl.textContent = "接続が切れました。ページを再読み込みしてください。"; };
+  ws.onerror = () => { statusEl.textContent = "接続エラー"; };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === "welcome") {
+      token = msg.token;
+      sessionStorage.setItem("nac_token", token);
+      statusEl.textContent = `あなたのタグ: ${msg.tag}`;
+      if (msg.group) {
+        myGroup = msg.group;
+        showResult(msg.group, false);
+      }
+    }
+
+    if (msg.type === "assigned") {
+      myGroup = msg.group;
+      showResult(msg.group, msg.reassigned);
+    }
+
+    if (msg.type === "state") {
+      updateChoiceButtons(msg.groups);
+      if (myGroup && msg.groups[myGroup]) {
+        document.getElementById("resultCount").textContent = msg.groups[myGroup].count;
+      }
+    }
+  };
+
+  choicesEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".obj-btn");
+    if (!btn || btn.classList.contains("full")) return;
+    ws.send(JSON.stringify({ type: "choose", object: btn.dataset.obj }));
+  });
+
+  function updateChoiceButtons(groups) {
+    document.querySelectorAll(".obj-btn").forEach((btn) => {
+      const g = groups[btn.dataset.obj];
+      if (!g) return;
+      btn.classList.toggle("inactive", !g.active);
+      btn.classList.toggle("full", g.count >= g.capacity);
+      btn.querySelector(".count").textContent = `${g.count} 人`;
+    });
+  }
+
+  const emojiFor = { apple: "🍎", banana: "🍌", fox: "🦊", bear: "🐻" };
+
+  function showResult(group, reassigned) {
+    choicesEl.style.display = "none";
+    resultEl.style.display = "block";
+    document.getElementById("resultEmoji").textContent = emojiFor[group] || "🎉";
+    document.getElementById("resultGroup").textContent = group;
+    document.getElementById("reassignNote").style.display = reassigned ? "block" : "none";
+  }
+</script>
+</body>
+</html>

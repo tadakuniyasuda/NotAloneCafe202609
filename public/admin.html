@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Not Alone Cafe — Admin</title>
+<style>
+  :root {
+    --cream: #FBF7F0;
+    --sky-deep: #5B9BC4;
+    --ink: #2B2B2B;
+    --coral: #E8746B;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--cream);
+    font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    color: var(--ink);
+    padding: 20px;
+  }
+  h1 { font-size: 1.2rem; margin-bottom: 4px; }
+  .sub { font-size: 0.8rem; color: #888; margin-bottom: 20px; }
+
+  .controls { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  .controls label { font-size: 0.85rem; }
+  select, button {
+    font-size: 0.85rem;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    background: white;
+  }
+  button.primary { background: var(--sky-deep); color: white; border: none; cursor: pointer; }
+  button.danger { color: var(--coral); border-color: var(--coral); cursor: pointer; background: white; }
+
+  .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .group-card { background: white; border-radius: 14px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .group-card h3 { margin: 0 0 6px; font-size: 0.95rem; }
+  .group-card .count { font-size: 1.4rem; font-weight: 700; }
+  .group-card .cap { font-size: 0.75rem; color: #999; }
+
+  table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 10px; font-size: 0.85rem; border-bottom: 1px solid #f0f0f0; }
+  th { background: #f5f1ea; font-weight: 600; }
+  select.move-select { padding: 4px 6px; }
+
+  .status { margin-top: 16px; font-size: 0.75rem; color: #b5b5b5; }
+</style>
+</head>
+<body>
+  <h1>Not Alone Cafe — 管理画面</h1>
+  <div class="sub">グループの状況を見て、必要なら手動で移動できます</div>
+
+  <div class="controls">
+    <label for="numGroupsSelect">グループ数:</label>
+    <select id="numGroupsSelect">
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4" selected>4</option>
+    </select>
+    <button class="danger" id="resetBtn">全員リセット</button>
+  </div>
+
+  <div class="groups" id="groupCards"></div>
+
+  <table>
+    <thead><tr><th>タグ</th><th>グループ</th><th>移動</th></tr></thead>
+    <tbody id="roster"></tbody>
+  </table>
+
+  <div class="status" id="status">接続中…</div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const key = params.get("key") || "";
+  const statusEl = document.getElementById("status");
+  const groupCardsEl = document.getElementById("groupCards");
+  const rosterEl = document.getElementById("roster");
+  const numGroupsSelect = document.getElementById("numGroupsSelect");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/?admin=1&key=${encodeURIComponent(key)}`);
+
+  ws.onopen = () => { statusEl.textContent = "接続済み"; };
+  ws.onclose = () => { statusEl.textContent = "接続が切れました"; };
+  ws.onerror = () => { statusEl.textContent = "接続エラー（管理キーを確認してください）"; };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "error") { statusEl.textContent = msg.message; return; }
+    if (msg.type === "adminState") render(msg);
+  };
+
+  numGroupsSelect.addEventListener("change", () => {
+    ws.send(JSON.stringify({ type: "setNumGroups", value: parseInt(numGroupsSelect.value, 10) }));
+  });
+
+  resetBtn.addEventListener("click", () => {
+    if (confirm("全員の参加状態をリセットしますか？（次のイベント前などに使用）")) {
+      ws.send(JSON.stringify({ type: "reset" }));
+    }
+  });
+
+  const ALL_GROUPS = ["apple", "banana", "fox", "bear"];
+
+  function render(state) {
+    numGroupsSelect.value = state.numGroups;
+
+    groupCardsEl.innerHTML = "";
+    for (const [key, g] of Object.entries(state.groups)) {
+      if (!g.active) continue;
+      const card = document.createElement("div");
+      card.className = "group-card";
+      card.innerHTML = `<h3>${g.label}</h3><div class="count">${g.count}</div><div class="cap">目安: ${g.capacity} 人まで</div>`;
+      groupCardsEl.appendChild(card);
+    }
+
+    rosterEl.innerHTML = "";
+    for (const person of state.roster) {
+      const tr = document.createElement("tr");
+      const options = ALL_GROUPS.map(
+        (g) => `<option value="${g}" ${g === person.group ? "selected" : ""}>${g}</option>`
+      ).join("");
+      tr.innerHTML = `
+        <td>${person.tag}</td>
+        <td>${person.group || "-"}</td>
+        <td><select class="move-select" data-token="${person.token}">${options}</select></td>
+      `;
+      rosterEl.appendChild(tr);
+    }
+
+    rosterEl.querySelectorAll(".move-select").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        ws.send(JSON.stringify({ type: "move", token: sel.dataset.token, toGroup: sel.value }));
+      });
+    });
+  }
+</script>
+</body>
+</html>
