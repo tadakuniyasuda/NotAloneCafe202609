@@ -125,6 +125,7 @@
   </table>
 
   <div class="status" id="status">接続中…</div>
+  <audio id="notifSound" src="/sound/notification.mp3" preload="auto"></audio>
 
 <script>
   const params = new URLSearchParams(location.search);
@@ -133,6 +134,19 @@
   const groupCardsEl = document.getElementById("groupCards");
   const rosterEl = document.getElementById("roster");
   const numGroupsSelect = document.getElementById("numGroupsSelect");
+  const notifSound = document.getElementById("notifSound");
+
+  // Unlock audio on the first click anywhere in the admin UI (browsers require
+  // one real interaction before JS can play sound). Admins naturally click
+  // something (a dropdown, a button) soon after opening this page, so this is
+  // unobtrusive rather than a blocking overlay like the display page has.
+  document.addEventListener("click", function unlockAudio() {
+    notifSound.play().then(() => { notifSound.pause(); notifSound.currentTime = 0; }).catch(() => {});
+    document.removeEventListener("click", unlockAudio);
+  }, { once: true });
+
+  let previousQuestion = null;
+  let adminInitiatedChange = false; // true right after the admin themself triggers a question/shuffle change
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/?admin=1&key=${encodeURIComponent(key)}`);
@@ -162,17 +176,18 @@
 
   document.getElementById("setPresetBtn").addEventListener("click", () => {
     const v = document.getElementById("questionPreset").value;
-    if (v) sendMsg({ type: "setQuestion", text: v });
+    if (v) { adminInitiatedChange = true; sendMsg({ type: "setQuestion", text: v }); }
   });
   document.getElementById("setCustomBtn").addEventListener("click", () => {
     const input = document.getElementById("customQuestion");
     if (input.value.trim()) {
+      adminInitiatedChange = true;
       sendMsg({ type: "setQuestion", text: input.value.trim() });
       input.value = "";
     }
   });
-  document.getElementById("clearQBtn").addEventListener("click", () => sendMsg({ type: "setQuestion", text: "" }));
-  document.getElementById("shuffleNowBtn").addEventListener("click", () => sendMsg({ type: "shuffleNow" }));
+  document.getElementById("clearQBtn").addEventListener("click", () => { adminInitiatedChange = true; sendMsg({ type: "setQuestion", text: "" }); });
+  document.getElementById("shuffleNowBtn").addEventListener("click", () => { adminInitiatedChange = true; sendMsg({ type: "shuffleNow" }); });
   document.getElementById("autoToggle").addEventListener("change", (e) => sendMsg({ type: "toggleAuto", enabled: e.target.checked }));
 
   let currentSchedule = [];
@@ -203,6 +218,18 @@
   const VIBE_LABELS = { yellow: "イェロー", pink: "ピンク", green: "グリーン", blue: "ブルー" };
 
   function render(state) {
+    // Alert only when the question changed WITHOUT the admin themselves
+    // causing it — meaning the schedule fired automatically. If the admin
+    // clicked shuffle/setQuestion, they already see it happen, no need to alert.
+    if (previousQuestion !== null && state.question !== previousQuestion && state.question) {
+      if (!adminInitiatedChange) {
+        notifSound.currentTime = 0;
+        notifSound.play().catch(() => {});
+      }
+    }
+    adminInitiatedChange = false;
+    previousQuestion = state.question;
+
     loadPresets(state.questionPresets || []);
     numGroupsSelect.value = state.numTeams;
     currentSchedule = state.schedule || [];

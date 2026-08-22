@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Not Alone Cafe — Now Happening</title>
 <style>
   :root {
@@ -12,78 +12,121 @@
     --rainbow: linear-gradient(90deg, #F4A6A0, #F6D186, #A6D9B0, #93C7DE, #B7A6D9);
   }
   * { box-sizing: border-box; }
-  body {
+  html, body {
     margin: 0;
-    min-height: 100vh;
+    height: 100%;
+    overflow: hidden; /* everything must fit in one screen, no scrolling */
+  }
+  body {
+    height: 100dvh;
     background: var(--cream);
     font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
     color: var(--ink);
     display: flex;
     flex-direction: column;
-    align-items: center;
-    padding: 40px 24px;
+    padding: clamp(10px, 2.2vh, 22px) clamp(12px, 3vw, 28px);
+    gap: clamp(6px, 1.4vh, 14px);
   }
-  .rainbow-bar { height: 6px; width: 100px; border-radius: 3px; background: var(--rainbow); margin-bottom: 18px; }
-  h1 { font-size: 2.4rem; margin: 0 0 30px; letter-spacing: 0.02em; }
 
-  .layout {
+  /* --- Header: small logo + title, compact --- */
+  header {
     display: flex;
-    gap: 48px;
-    max-width: 1100px;
-    width: 100%;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
-    flex-wrap: wrap;
+    gap: clamp(6px, 1.5vw, 12px);
+    flex-shrink: 0;
+  }
+  header img { width: clamp(28px, 4.5vh, 44px); height: auto; }
+  h1 { font-size: clamp(1.1rem, 3.4vh, 1.7rem); margin: 0; letter-spacing: 0.01em; }
+  .rainbow-bar { height: 3px; width: clamp(40px, 6vw, 64px); border-radius: 2px; background: var(--rainbow); }
+
+  /* --- Main layout: row in landscape, column in portrait --- */
+  .layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: clamp(10px, 2vw, 22px);
+  }
+  @media (orientation: portrait) {
+    .layout { flex-direction: column; }
+    .qr-panel { flex: 0 0 auto; }
+  }
+  @media (orientation: landscape) {
+    .layout { flex-direction: row; }
+    .qr-panel { flex: 0 0 auto; }
+    .status-panel { flex: 1; }
   }
 
   .qr-panel {
     background: white;
-    border-radius: 24px;
-    padding: 28px;
+    border-radius: clamp(14px, 2vh, 22px);
+    padding: clamp(10px, 1.8vh, 20px);
     text-align: center;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    width: 280px;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.07);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(4px, 1vh, 10px);
+    min-height: 0;
   }
-  .qr-panel img { width: 200px; height: 200px; object-fit: contain; }
-  .qr-panel .cta {
-    margin-top: 16px;
-    font-size: 1.1rem;
-    font-weight: 700;
+  .qr-panel img.qr {
+    width: clamp(100px, 24vh, 190px);
+    height: clamp(100px, 24vh, 190px);
+    object-fit: contain;
   }
-  .qr-panel .cta-sub { font-size: 0.85rem; color: #888; margin-top: 4px; }
+  .qr-panel .cta { font-size: clamp(0.85rem, 2vh, 1.1rem); font-weight: 700; }
+  .qr-panel .cta-sub { font-size: clamp(0.6rem, 1.3vh, 0.8rem); color: #999; }
 
-  .status-panel { flex: 1; min-width: 340px; max-width: 620px; }
+  .status-panel {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(6px, 1.3vh, 14px);
+  }
 
   .question-card {
     background: white;
-    border-radius: 20px;
-    padding: 24px 28px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    margin-bottom: 24px;
+    border-radius: clamp(12px, 1.8vh, 18px);
+    padding: clamp(10px, 1.6vh, 20px) clamp(14px, 2vw, 22px);
+    box-shadow: 0 2px 14px rgba(0,0,0,0.07);
+    flex-shrink: 0;
   }
-  .question-card .label { font-size: 0.8rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
-  .question-card .q-text { font-size: 1.5rem; margin-top: 8px; line-height: 1.5; }
-  .question-card .q-text.empty { color: #ccc; font-size: 1.1rem; font-style: italic; }
+  .question-card .label { font-size: clamp(0.6rem, 1.3vh, 0.75rem); color: #b08a5a; font-weight: 600; letter-spacing: 0.04em; }
+  .question-card .q-text { font-size: clamp(0.95rem, 2.6vh, 1.35rem); margin-top: 4px; line-height: 1.4; }
+  .question-card .q-text.empty { color: #ccc; font-size: clamp(0.85rem, 2vh, 1rem); font-style: italic; }
 
   .teams-grid {
+    flex: 1;
+    min-height: 0;
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1fr;
-    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(6px, 1.3vw, 14px);
   }
   .team-card {
     background: white;
-    border-radius: 16px;
-    padding: 18px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border-radius: clamp(10px, 1.6vh, 16px);
+    padding: clamp(6px, 1.2vh, 16px);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
   }
-  .team-card h3 { margin: 0 0 6px; font-size: 1.1rem; }
-  .team-card .count { font-size: 2rem; font-weight: 700; color: var(--sky-deep); }
-  .team-card .count-label { font-size: 0.75rem; color: #999; }
+  .team-card h3 { margin: 0; font-size: clamp(0.8rem, 1.9vh, 1.05rem); }
+  .team-card .count { font-size: clamp(1.2rem, 3.6vh, 1.8rem); font-weight: 700; color: var(--sky-deep); line-height: 1.2; }
+  .team-card .count-label { font-size: clamp(0.6rem, 1.2vh, 0.75rem); color: #999; }
 
-  .next-shuffle { margin-top: 20px; font-size: 0.9rem; color: #888; text-align: center; }
+  .next-shuffle { font-size: clamp(0.65rem, 1.5vh, 0.85rem); color: #888; text-align: center; flex-shrink: 0; }
 
-  .status { margin-top: 30px; font-size: 0.75rem; color: #ccc; }
+  .status {
+    position: fixed;
+    bottom: 4px;
+    right: 8px;
+    font-size: 0.6rem;
+    color: #ccc;
+  }
 
   #soundOverlay {
     position: fixed;
@@ -100,7 +143,7 @@
     cursor: pointer;
   }
   #soundOverlay .icon { font-size: 3rem; }
-  #soundOverlay .msg { font-size: 1.2rem; max-width: 400px; padding: 0 20px; }
+  #soundOverlay .msg { font-size: 1.1rem; max-width: 380px; padding: 0 20px; }
 </style>
 </head>
 <body>
@@ -109,12 +152,17 @@
     <div class="msg">タップして通知音を有効にしてください<br><span style="opacity:0.7; font-size:0.9rem;">（イベント開始前に一度だけ）</span></div>
   </div>
 
-  <div class="rainbow-bar"></div>
-  <h1>Not Alone Cafe</h1>
+  <header>
+    <img src="/img/yellow.png" alt="Not Alone Cafe" />
+    <div>
+      <div class="rainbow-bar"></div>
+      <h1>Not Alone Cafe</h1>
+    </div>
+  </header>
 
   <div class="layout">
     <div class="qr-panel">
-      <img src="/img/qr.png" alt="QRコード" onerror="this.style.display='none'" />
+      <img class="qr" src="/img/qr.png" alt="QRコード" onerror="this.style.display='none'" />
       <div class="cta">Please visit for chat! 参加はこちらから</div>
       <div class="cta-sub">スマホのカメラでQRコードを読み取ってください</div>
     </div>
@@ -143,9 +191,6 @@
   let previousQuestion = null;
   let soundUnlocked = false;
 
-  // Browsers block audio.play() until the page has had a user interaction —
-  // this matters here because a kiosk/shared-screen display may never get a
-  // tap otherwise. Staff should tap once when setting up the screen.
   const overlay = document.getElementById("soundOverlay");
   overlay.addEventListener("click", () => {
     notifSound.play().then(() => {
@@ -154,14 +199,12 @@
       soundUnlocked = true;
       overlay.style.display = "none";
     }).catch(() => {
-      // Still blocked for some reason — hide overlay anyway so it doesn't block the
-      // display forever; sound just won't play until a future successful interaction.
       overlay.style.display = "none";
     });
   });
 
   ws.onopen = () => { statusEl.textContent = "接続済み"; };
-  ws.onclose = () => { statusEl.textContent = "接続が切れました。ページを再読み込みしてください。"; };
+  ws.onclose = () => { statusEl.textContent = "接続が切れました。再読み込みしてください。"; };
   ws.onerror = () => { statusEl.textContent = "接続エラー"; };
 
   ws.onmessage = (event) => {
@@ -170,8 +213,6 @@
   };
 
   function render(state) {
-    // A changed question means a shuffle just happened (scheduled or manual).
-    // Skip the very first render so connecting doesn't itself trigger a sound.
     if (previousQuestion !== null && state.question !== previousQuestion && state.question) {
       if (soundUnlocked) {
         notifSound.currentTime = 0;
