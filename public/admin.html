@@ -23,9 +23,20 @@
   .sub { font-size: 0.8rem; color: #888; margin-bottom: 20px; }
   h2.section { font-size: 0.9rem; margin: 26px 0 10px; color: #555; }
 
+  .card {
+    background: white;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 8px;
+  }
+  .card .current-label { font-size: 0.7rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
+  .card .current-q { font-size: 1.05rem; margin: 6px 0 14px; min-height: 1.4em; }
+  .card .current-q.empty { color: #bbb; font-style: italic; }
+
   .controls { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
   .controls label { font-size: 0.85rem; }
-  select, button, input[type=text] {
+  select, button, input[type=text], input[type=time] {
     font-size: 0.85rem;
     padding: 6px 10px;
     border-radius: 8px;
@@ -35,19 +46,14 @@
   button.primary { background: var(--sky-deep); color: white; border: none; cursor: pointer; }
   button.danger { color: var(--coral); border-color: var(--coral); cursor: pointer; background: white; }
   button.ghost { cursor: pointer; }
-
-  .question-card {
-    background: white;
-    border-radius: 14px;
-    padding: 16px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    margin-bottom: 8px;
-  }
-  .question-card .current-label { font-size: 0.7rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
-  .question-card .current-q { font-size: 1.05rem; margin: 6px 0 14px; min-height: 1.4em; }
-  .question-card .current-q.empty { color: #bbb; font-style: italic; }
-
   input[type=text] { flex: 1; min-width: 180px; }
+
+  .schedule-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .schedule-item { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+  .schedule-item .fired { color: #aaa; text-decoration: line-through; }
+  .schedule-item button { padding: 2px 8px; font-size: 0.75rem; }
+
+  .toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 0.85rem; }
 
   .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 24px; }
   .group-card { background: white; border-radius: 14px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
@@ -65,28 +71,43 @@
 </head>
 <body>
   <h1>Not Alone Cafe — 管理画面</h1>
-  <div class="sub">グループの状況とディスカッションテーマを管理します</div>
+  <div class="sub">グループとディスカッションのスケジュールを管理します</div>
 
   <h2 class="section">ディスカッションテーマ</h2>
-  <div class="question-card">
+  <div class="card">
     <div class="current-label">現在表示中のテーマ</div>
     <div class="current-q empty" id="currentQDisplay">（まだ設定されていません）</div>
-
     <div class="controls">
       <select id="questionPreset"></select>
       <button class="primary ghost" id="setPresetBtn">このテーマにする</button>
-      <button class="ghost" id="randomBtn">🎲 ランダム</button>
     </div>
     <div class="controls">
       <input type="text" id="customQuestion" placeholder="オリジナルのテーマを入力…" />
       <button class="primary ghost" id="setCustomBtn">設定する</button>
-      <button class="danger" id="clearQBtn">テーマをクリア</button>
+      <button class="danger" id="clearQBtn">クリア</button>
+    </div>
+  </div>
+
+  <h2 class="section">自動シャッフル・スケジュール</h2>
+  <div class="card">
+    <div class="toggle-row">
+      <input type="checkbox" id="autoToggle" checked />
+      <label for="autoToggle">自動シャッフルを有効にする</label>
+    </div>
+    <div class="schedule-list" id="scheduleList"></div>
+    <div class="controls">
+      <input type="time" id="newTimeInput" />
+      <button class="ghost" id="addTimeBtn">時刻を追加</button>
+      <button class="danger" id="clearScheduleBtn">全て削除</button>
+    </div>
+    <div class="controls">
+      <button class="primary" id="shuffleNowBtn">🔀 今すぐ全員シャッフル</button>
     </div>
   </div>
 
   <h2 class="section">グループ設定</h2>
   <div class="controls">
-    <label for="numGroupsSelect">グループ数:</label>
+    <label for="numGroupsSelect">チーム数:</label>
     <select id="numGroupsSelect">
       <option value="1">1</option>
       <option value="2">2</option>
@@ -99,7 +120,7 @@
   <div class="groups" id="groupCards"></div>
 
   <table>
-    <thead><tr><th>タグ</th><th>気分</th><th>グループ</th><th>移動</th></tr></thead>
+    <thead><tr><th>タグ</th><th>気分</th><th>チーム</th><th>移動</th></tr></thead>
     <tbody id="roster"></tbody>
   </table>
 
@@ -112,31 +133,6 @@
   const groupCardsEl = document.getElementById("groupCards");
   const rosterEl = document.getElementById("roster");
   const numGroupsSelect = document.getElementById("numGroupsSelect");
-  const resetBtn = document.getElementById("resetBtn");
-
-  // Drafted conversation-starter questions — edit this list freely.
-  const QUESTION_PRESETS = [
-    "好きな飲み物は？",
-    "最近ハマっていることは？",
-    "休日は何をして過ごしていますか？",
-    "好きな音楽のジャンルは？",
-    "好きな映画やドラマは？",
-    "今まで行った中で好きな旅行先は？",
-    "好きな食べ物、または苦手な食べ物は？",
-    "最近見て良かったものは？（映画・本・SNSなど）",
-    "もし何でも一つ叶うとしたら？",
-    "東京で好きな場所は？",
-    "ペットを飼うなら何を飼いたい？",
-    "今年挑戦したいことは？",
-  ];
-
-  const presetSelect = document.getElementById("questionPreset");
-  QUESTION_PRESETS.forEach((q) => {
-    const opt = document.createElement("option");
-    opt.value = q;
-    opt.textContent = q;
-    presetSelect.appendChild(opt);
-  });
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/?admin=1&key=${encodeURIComponent(key)}`);
@@ -151,43 +147,65 @@
     if (msg.type === "adminState") render(msg);
   };
 
+  let presetsLoaded = false;
+  function loadPresets(list) {
+    if (presetsLoaded) return;
+    const presetSelect = document.getElementById("questionPreset");
+    list.forEach((q) => {
+      const opt = document.createElement("option");
+      opt.value = q;
+      opt.textContent = q;
+      presetSelect.appendChild(opt);
+    });
+    presetsLoaded = true;
+  }
+
   document.getElementById("setPresetBtn").addEventListener("click", () => {
-    if (presetSelect.value) sendQuestion(presetSelect.value);
-  });
-  document.getElementById("randomBtn").addEventListener("click", () => {
-    const pick = QUESTION_PRESETS[Math.floor(Math.random() * QUESTION_PRESETS.length)];
-    sendQuestion(pick);
+    const v = document.getElementById("questionPreset").value;
+    if (v) sendMsg({ type: "setQuestion", text: v });
   });
   document.getElementById("setCustomBtn").addEventListener("click", () => {
     const input = document.getElementById("customQuestion");
     if (input.value.trim()) {
-      sendQuestion(input.value.trim());
+      sendMsg({ type: "setQuestion", text: input.value.trim() });
       input.value = "";
     }
   });
-  document.getElementById("clearQBtn").addEventListener("click", () => {
-    sendQuestion("");
+  document.getElementById("clearQBtn").addEventListener("click", () => sendMsg({ type: "setQuestion", text: "" }));
+  document.getElementById("shuffleNowBtn").addEventListener("click", () => sendMsg({ type: "shuffleNow" }));
+  document.getElementById("autoToggle").addEventListener("change", (e) => sendMsg({ type: "toggleAuto", enabled: e.target.checked }));
+
+  let currentSchedule = [];
+
+  document.getElementById("addTimeBtn").addEventListener("click", () => {
+    const val = document.getElementById("newTimeInput").value; // "HH:MM"
+    if (!val) return;
+    const items = [...currentSchedule.map((s) => ({ time: s.time })), { time: val }];
+    sendMsg({ type: "setSchedule", items });
+    document.getElementById("newTimeInput").value = "";
   });
 
-  function sendQuestion(text) {
-    ws.send(JSON.stringify({ type: "setQuestion", text }));
-  }
+  document.getElementById("clearScheduleBtn").addEventListener("click", () => {
+    if (confirm("スケジュールを全て削除しますか？")) sendMsg({ type: "setSchedule", items: [] });
+  });
 
   numGroupsSelect.addEventListener("change", () => {
-    ws.send(JSON.stringify({ type: "setNumGroups", value: parseInt(numGroupsSelect.value, 10) }));
+    sendMsg({ type: "setNumGroups", value: parseInt(numGroupsSelect.value, 10) });
   });
 
-  resetBtn.addEventListener("click", () => {
-    if (confirm("全員の参加状態とテーマをリセットしますか？（次のイベント前などに使用）")) {
-      ws.send(JSON.stringify({ type: "reset" }));
-    }
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    if (confirm("全員の参加状態とテーマ・履歴をリセットしますか？")) sendMsg({ type: "reset" });
   });
 
-  const ALL_GROUPS = ["apple", "banana", "fox", "bear"];
-  const VIBE_LABELS = { offer: "🍒差し出す", greet: "👋あいさつ", nice: "👍いいね", rest: "☕ひと休み" };
+  function sendMsg(obj) { ws.send(JSON.stringify(obj)); }
+
+  const ALL_TEAMS = ["A", "B", "C", "D"];
+  const VIBE_LABELS = { yellow: "イェロー", pink: "ピンク", green: "グリーン", blue: "ブルー" };
 
   function render(state) {
-    numGroupsSelect.value = state.numGroups;
+    loadPresets(state.questionPresets || []);
+    numGroupsSelect.value = state.numTeams;
+    currentSchedule = state.schedule || [];
 
     const qDisplay = document.getElementById("currentQDisplay");
     if (state.question && state.question.length > 0) {
@@ -198,20 +216,38 @@
       qDisplay.classList.add("empty");
     }
 
+    document.getElementById("autoToggle").checked = !!state.autoEnabled;
+
+    const listEl = document.getElementById("scheduleList");
+    listEl.innerHTML = "";
+    currentSchedule.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "schedule-item";
+      row.innerHTML = `
+        <span class="${item.fired ? "fired" : ""}">${item.time}${item.fired ? "（実施済み）" : ""}</span>
+        <button data-id="${item.id}">削除</button>
+      `;
+      row.querySelector("button").addEventListener("click", () => {
+        const items = currentSchedule.filter((s) => s.id !== item.id).map((s) => ({ time: s.time }));
+        sendMsg({ type: "setSchedule", items });
+      });
+      listEl.appendChild(row);
+    });
+
     groupCardsEl.innerHTML = "";
-    for (const [key, g] of Object.entries(state.groups)) {
-      if (!g.active) continue;
+    for (const [key, t] of Object.entries(state.teams)) {
+      if (!t.active) continue;
       const card = document.createElement("div");
       card.className = "group-card";
-      card.innerHTML = `<h3>${g.label}</h3><div class="count">${g.count}</div><div class="cap">目安: ${g.capacity} 人まで</div>`;
+      card.innerHTML = `<h3>${t.label}</h3><div class="count">${t.count}</div><div class="cap">目安: ${t.capacity} 人まで</div>`;
       groupCardsEl.appendChild(card);
     }
 
     rosterEl.innerHTML = "";
     for (const person of state.roster) {
       const tr = document.createElement("tr");
-      const options = ALL_GROUPS.map(
-        (g) => `<option value="${g}" ${g === person.group ? "selected" : ""}>${g}</option>`
+      const options = ALL_TEAMS.map(
+        (t) => `<option value="${t}" ${t === person.group ? "selected" : ""}>${t}</option>`
       ).join("");
       tr.innerHTML = `
         <td>${person.tag}</td>
@@ -224,7 +260,7 @@
 
     rosterEl.querySelectorAll(".move-select").forEach((sel) => {
       sel.addEventListener("change", () => {
-        ws.send(JSON.stringify({ type: "move", token: sel.dataset.token, toGroup: sel.value }));
+        sendMsg({ type: "move", token: sel.dataset.token, toGroup: sel.value });
       });
     });
   }

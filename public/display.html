@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Not Alone Cafe — Now Happening</title>
+<style>
+  :root {
+    --cream: #FBF7F0;
+    --sky-deep: #5B9BC4;
+    --ink: #2B2B2B;
+    --rainbow: linear-gradient(90deg, #F4A6A0, #F6D186, #A6D9B0, #93C7DE, #B7A6D9);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--cream);
+    font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 24px;
+  }
+  .rainbow-bar { height: 6px; width: 100px; border-radius: 3px; background: var(--rainbow); margin-bottom: 18px; }
+  h1 { font-size: 2.4rem; margin: 0 0 30px; letter-spacing: 0.02em; }
+
+  .layout {
+    display: flex;
+    gap: 48px;
+    max-width: 1100px;
+    width: 100%;
+    align-items: flex-start;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .qr-panel {
+    background: white;
+    border-radius: 24px;
+    padding: 28px;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    width: 280px;
+  }
+  .qr-panel img { width: 200px; height: 200px; object-fit: contain; }
+  .qr-panel .cta {
+    margin-top: 16px;
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .qr-panel .cta-sub { font-size: 0.85rem; color: #888; margin-top: 4px; }
+
+  .status-panel { flex: 1; min-width: 340px; max-width: 620px; }
+
+  .question-card {
+    background: white;
+    border-radius: 20px;
+    padding: 24px 28px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    margin-bottom: 24px;
+  }
+  .question-card .label { font-size: 0.8rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
+  .question-card .q-text { font-size: 1.5rem; margin-top: 8px; line-height: 1.5; }
+  .question-card .q-text.empty { color: #ccc; font-size: 1.1rem; font-style: italic; }
+
+  .teams-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .team-card {
+    background: white;
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    text-align: center;
+  }
+  .team-card h3 { margin: 0 0 6px; font-size: 1.1rem; }
+  .team-card .count { font-size: 2rem; font-weight: 700; color: var(--sky-deep); }
+  .team-card .count-label { font-size: 0.75rem; color: #999; }
+
+  .next-shuffle { margin-top: 20px; font-size: 0.9rem; color: #888; text-align: center; }
+
+  .status { margin-top: 30px; font-size: 0.75rem; color: #ccc; }
+
+  #soundOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(43,43,43,0.9);
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    text-align: center;
+    z-index: 100;
+    cursor: pointer;
+  }
+  #soundOverlay .icon { font-size: 3rem; }
+  #soundOverlay .msg { font-size: 1.2rem; max-width: 400px; padding: 0 20px; }
+</style>
+</head>
+<body>
+  <div id="soundOverlay">
+    <div class="icon">🔔</div>
+    <div class="msg">タップして通知音を有効にしてください<br><span style="opacity:0.7; font-size:0.9rem;">（イベント開始前に一度だけ）</span></div>
+  </div>
+
+  <div class="rainbow-bar"></div>
+  <h1>Not Alone Cafe</h1>
+
+  <div class="layout">
+    <div class="qr-panel">
+      <img src="/img/qr.png" alt="QRコード" onerror="this.style.display='none'" />
+      <div class="cta">Please visit for chat! 参加はこちらから</div>
+      <div class="cta-sub">スマホのカメラでQRコードを読み取ってください</div>
+    </div>
+
+    <div class="status-panel">
+      <div class="question-card">
+        <div class="label">今のディスカッションテーマ</div>
+        <div class="q-text empty" id="questionText">まだ始まっていません</div>
+      </div>
+
+      <div class="teams-grid" id="teamsGrid"></div>
+
+      <div class="next-shuffle" id="nextShuffle"></div>
+    </div>
+  </div>
+
+  <div class="status" id="status">接続中…</div>
+  <audio id="notifSound" src="/sound/notification.mp3" preload="auto"></audio>
+
+<script>
+  const statusEl = document.getElementById("status");
+  const notifSound = document.getElementById("notifSound");
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/?display=1`);
+
+  let previousQuestion = null;
+  let soundUnlocked = false;
+
+  // Browsers block audio.play() until the page has had a user interaction —
+  // this matters here because a kiosk/shared-screen display may never get a
+  // tap otherwise. Staff should tap once when setting up the screen.
+  const overlay = document.getElementById("soundOverlay");
+  overlay.addEventListener("click", () => {
+    notifSound.play().then(() => {
+      notifSound.pause();
+      notifSound.currentTime = 0;
+      soundUnlocked = true;
+      overlay.style.display = "none";
+    }).catch(() => {
+      // Still blocked for some reason — hide overlay anyway so it doesn't block the
+      // display forever; sound just won't play until a future successful interaction.
+      overlay.style.display = "none";
+    });
+  });
+
+  ws.onopen = () => { statusEl.textContent = "接続済み"; };
+  ws.onclose = () => { statusEl.textContent = "接続が切れました。ページを再読み込みしてください。"; };
+  ws.onerror = () => { statusEl.textContent = "接続エラー"; };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "state") render(msg);
+  };
+
+  function render(state) {
+    // A changed question means a shuffle just happened (scheduled or manual).
+    // Skip the very first render so connecting doesn't itself trigger a sound.
+    if (previousQuestion !== null && state.question !== previousQuestion && state.question) {
+      if (soundUnlocked) {
+        notifSound.currentTime = 0;
+        notifSound.play().catch(() => {});
+      }
+    }
+    previousQuestion = state.question;
+
+    const qEl = document.getElementById("questionText");
+    if (state.question && state.question.length > 0) {
+      qEl.textContent = state.question;
+      qEl.classList.remove("empty");
+    } else {
+      qEl.textContent = "まだ始まっていません";
+      qEl.classList.add("empty");
+    }
+
+    const grid = document.getElementById("teamsGrid");
+    grid.innerHTML = "";
+    for (const [key, t] of Object.entries(state.teams)) {
+      if (!t.active) continue;
+      const card = document.createElement("div");
+      card.className = "team-card";
+      card.innerHTML = `<h3>${t.label}</h3><div class="count">${t.count}</div><div class="count-label">人</div>`;
+      grid.appendChild(card);
+    }
+
+    const nextEl = document.getElementById("nextShuffle");
+    const upcoming = (state.schedule || []).filter((s) => !s.fired);
+    if (!state.autoEnabled) {
+      nextEl.textContent = "自動シャッフル: 停止中";
+    } else if (upcoming.length > 0) {
+      nextEl.textContent = `次のシャッフル予定: ${upcoming[0].time}`;
+    } else {
+      nextEl.textContent = "";
+    }
+  }
+</script>
+</body>
+</html>
