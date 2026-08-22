@@ -93,6 +93,46 @@
   #chooseAgainBtn:active { transform: scale(0.97); }
 
   .status { margin-top: 20px; font-size: 0.75rem; color: #b5b5b5; text-align: center; }
+
+  footer.info-footer {
+    width: 100%;
+    max-width: 420px;
+    margin-top: 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .info-card {
+    background: white;
+    border-radius: 18px;
+    padding: 18px 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+  }
+  .info-card .info-title {
+    font-size: 0.75rem;
+    color: #b08a5a;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .info-card .info-main { font-size: 0.95rem; line-height: 1.5; }
+  .info-card .info-sub { font-size: 0.78rem; color: #999; margin-top: 4px; line-height: 1.5; }
+  .info-card a {
+    color: var(--sky-deep);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .info-card a:active { opacity: 0.7; }
+  .link-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .link-list a {
+    display: block;
+    font-size: 0.9rem;
+    color: var(--sky-deep);
+    text-decoration: none;
+    padding: 6px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .link-list a:last-child { border-bottom: none; }
 </style>
 </head>
 <body>
@@ -124,6 +164,29 @@
       <button id="chooseAgainBtn">別の気分を選びなおす</button>
     </div>
   </div>
+
+  <footer class="info-footer">
+    <div class="info-card">
+      <div class="info-title">次回のお知らせ</div>
+      <div class="info-main">次回は10月4日（日）14:00〜17:00<br>九州男で開催！</div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-title">オリジナルグッズ</div>
+      <div class="info-main"><a href="https://juanyang.stores.jp/" target="_blank" rel="noopener">オリジナルTシャツはこちら！</a></div>
+      <div class="info-sub">利益はこのイベントの活動に使わせていただきます！</div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-title">その他のリンク</div>
+      <div class="link-list">
+        <a href="https://akta.jp/" target="_blank" rel="noopener">akta</a>
+        <a href="https://ptokyo.org/" target="_blank" rel="noopener">Place Tokyo</a>
+        <a href="https://x.com/DRAGONMEN_?lang=ja" target="_blank" rel="noopener">Dragon Men</a>
+        <a href="https://x.com/bar_kusuo" target="_blank" rel="noopener">九州男</a>
+      </div>
+    </div>
+  </footer>
 
   <div class="status" id="status">接続中…</div>
   <audio id="notifSound" src="/sound/notification.mp3" preload="auto"></audio>
