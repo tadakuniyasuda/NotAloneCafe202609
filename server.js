@@ -1,10 +1,15 @@
 // Not Alone Cafe — live event grouping server
 //
-// - Attendees connect from their phone, pick an object (apple/banana/fox/bear),
-//   and get auto-assigned to a group. If their pick is full, they're routed to
-//   whichever active group currently has the fewest people.
-// - Admin connects separately and can see everyone's group live, manually move
-//   people between groups, and change how many groups are active.
+// - Attendees connect from their phone and pick a "vibe" icon (an icebreaker
+//   flavor, based on the mascot's poses). The vibe is just self-expression —
+//   it does NOT determine which group they land in.
+// - Group assignment is always balanced separately: whoever picks next goes
+//   to whichever active group currently has the fewest people.
+// - Admin can start a "discussion round" by setting a question, which every
+//   attendee sees alongside their group. Latecomers get folded into the
+//   smallest group and immediately see the current question.
+// - Admin can manually move anyone between groups at any time, and change how
+//   many groups are active.
 // - Nothing is stored permanently. All state lives in memory and resets when
 //   the server restarts (fresh start each event night).
 
@@ -14,7 +19,7 @@ const WebSocket = require("ws");
 const crypto = require("crypto");
 
 const PORT = process.env.PORT || 3000;
-const ADMIN_KEY = process.env.ADMIN_KEY || "nac202609"; // change before deploying!
+const ADMIN_KEY = process.env.ADMIN_KEY || "notalone2026"; // change before deploying!
 
 // All four possible group identities. Only the first `numGroups` are "active"
 // at any given time — admin controls this live based on turnout.
@@ -24,8 +29,9 @@ const GROUP_LABELS = { apple: "🍎 Apple", banana: "🍌 Banana", fox: "🦊 Fo
 const TAG_ANIMALS = ["Fox", "Bear", "Otter", "Rabbit", "Deer", "Owl", "Cat", "Finch"];
 
 let numGroups = 4; // admin-adjustable, 1-4
+let currentQuestion = ""; // empty string = no discussion round active yet
 
-// token -> { tag, group, ws, adminWs: false, connected }
+// token -> { tag, group, vibe, ws, isAdmin, connected }
 const clients = new Map();
 
 const app = express();
@@ -52,13 +58,13 @@ function groupCounts() {
   const counts = {};
   for (const g of ALL_GROUPS) counts[g] = 0;
   for (const c of clients.values()) {
-    if (c.connected && c.group) counts[c.group] = (counts[c.group] || 0) + 1;
+    if (c.connected && !c.isAdmin && c.group) counts[c.group] = (counts[c.group] || 0) + 1;
   }
   return counts;
 }
 
 function capacityPerGroup() {
-  const total = [...clients.values()].filter((c) => c.connected && c.group).length;
+  const total = [...clients.values()].filter((c) => c.connected && !c.isAdmin && c.group).length;
   return Math.max(1, Math.ceil(total / Math.max(1, numGroups)));
 }
 
@@ -72,16 +78,11 @@ function leastFullActiveGroup(counts) {
   return best;
 }
 
-function assignGroup(requestedObject) {
+// Group assignment is ALWAYS balance-driven. The vibe icon a person taps is
+// flavor only — it's stored separately for display and does not affect which
+// group they're placed in.
+function assignGroup() {
   const counts = groupCounts();
-  const cap = capacityPerGroup();
-  const active = activeGroups();
-
-  const wantsActive = active.includes(requestedObject);
-  if (wantsActive && counts[requestedObject] < cap) {
-    return requestedObject;
-  }
-  // Requested group is full (or not currently active) — route to least-full active group
   return leastFullActiveGroup(counts);
 }
 
@@ -97,21 +98,14 @@ function publicState() {
       capacity: cap,
     };
   }
-  return { type: "state", numGroups, groups };
+  return { type: "state", numGroups, groups, question: currentQuestion };
 }
 
 function adminState() {
   const roster = [...clients.entries()]
     .filter(([, c]) => c.connected && !c.isAdmin)
-    .map(([token, c]) => ({ token, tag: c.tag, group: c.group }));
-  return { type: "adminState", numGroups, groups: publicState().groups, roster };
-}
-
-function broadcast(msg) {
-  const json = JSON.stringify(msg);
-  for (const c of clients.values()) {
-    if (c.connected && c.ws.readyState === WebSocket.OPEN) c.ws.send(json);
-  }
+    .map(([token, c]) => ({ token, tag: c.tag, group: c.group, vibe: c.vibe }));
+  return { type: "adminState", numGroups, groups: publicState().groups, question: currentQuestion, roster };
 }
 
 function broadcastState() {
@@ -135,7 +129,7 @@ wss.on("connection", (ws, req) => {
       return;
     }
     const token = makeToken();
-    clients.set(token, { tag: "ADMIN", group: null, ws, isAdmin: true, connected: true });
+    clients.set(token, { tag: "ADMIN", group: null, vibe: null, ws, isAdmin: true, connected: true });
     ws.send(JSON.stringify({ type: "welcome", token, isAdmin: true }));
     ws.send(JSON.stringify(adminState()));
 
@@ -167,26 +161,40 @@ wss.on("connection", (ws, req) => {
         c.connected = true;
       } else {
         token = makeToken();
-        clients.set(token, { tag: makeTag(), group: null, ws, isAdmin: false, connected: true });
+        clients.set(token, { tag: makeTag(), group: null, vibe: null, ws, isAdmin: false, connected: true });
       }
       const c = clients.get(token);
-      ws.send(JSON.stringify({ type: "welcome", token, tag: c.tag, group: c.group }));
+      ws.send(
+        JSON.stringify({
+          type: "welcome",
+          token,
+          tag: c.tag,
+          group: c.group,
+          groupLabel: c.group ? GROUP_LABELS[c.group] : null,
+          vibe: c.vibe,
+          question: currentQuestion,
+        })
+      );
       broadcastState();
       return;
     }
 
+    // Picking (or re-picking) a vibe. Always re-balances group placement —
+    // this is what powers both first-join AND the "choose again" button.
     if (msg.type === "choose" && token) {
       const c = clients.get(token);
-      if (!c || c.group) return; // already assigned, ignore repeat picks
-      const group = assignGroup(msg.object);
+      if (!c) return;
+      c.vibe = msg.vibe || null;
+      c.group = null; // release current slot so the recompute below is fair
+      const group = assignGroup();
       c.group = group;
-      const wasReassigned = group !== msg.object;
       ws.send(
         JSON.stringify({
           type: "assigned",
           group,
           label: GROUP_LABELS[group],
-          reassigned: wasReassigned,
+          vibe: c.vibe,
+          question: currentQuestion,
         })
       );
       broadcastState();
@@ -222,10 +230,17 @@ function handleAdminMessage(raw) {
     return;
   }
 
+  if (msg.type === "setQuestion" && typeof msg.text === "string") {
+    currentQuestion = msg.text.trim();
+    broadcastState();
+    return;
+  }
+
   if (msg.type === "reset") {
     for (const [token, c] of clients.entries()) {
       if (!c.isAdmin) clients.delete(token);
     }
+    currentQuestion = "";
     broadcastState();
     return;
   }

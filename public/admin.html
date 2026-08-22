@@ -21,10 +21,11 @@
   }
   h1 { font-size: 1.2rem; margin-bottom: 4px; }
   .sub { font-size: 0.8rem; color: #888; margin-bottom: 20px; }
+  h2.section { font-size: 0.9rem; margin: 26px 0 10px; color: #555; }
 
-  .controls { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  .controls { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
   .controls label { font-size: 0.85rem; }
-  select, button {
+  select, button, input[type=text] {
     font-size: 0.85rem;
     padding: 6px 10px;
     border-radius: 8px;
@@ -33,6 +34,20 @@
   }
   button.primary { background: var(--sky-deep); color: white; border: none; cursor: pointer; }
   button.danger { color: var(--coral); border-color: var(--coral); cursor: pointer; background: white; }
+  button.ghost { cursor: pointer; }
+
+  .question-card {
+    background: white;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 8px;
+  }
+  .question-card .current-label { font-size: 0.7rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
+  .question-card .current-q { font-size: 1.05rem; margin: 6px 0 14px; min-height: 1.4em; }
+  .question-card .current-q.empty { color: #bbb; font-style: italic; }
+
+  input[type=text] { flex: 1; min-width: 180px; }
 
   .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 24px; }
   .group-card { background: white; border-radius: 14px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
@@ -50,8 +65,26 @@
 </head>
 <body>
   <h1>Not Alone Cafe — 管理画面</h1>
-  <div class="sub">グループの状況を見て、必要なら手動で移動できます</div>
+  <div class="sub">グループの状況とディスカッションテーマを管理します</div>
 
+  <h2 class="section">ディスカッションテーマ</h2>
+  <div class="question-card">
+    <div class="current-label">現在表示中のテーマ</div>
+    <div class="current-q empty" id="currentQDisplay">（まだ設定されていません）</div>
+
+    <div class="controls">
+      <select id="questionPreset"></select>
+      <button class="primary ghost" id="setPresetBtn">このテーマにする</button>
+      <button class="ghost" id="randomBtn">🎲 ランダム</button>
+    </div>
+    <div class="controls">
+      <input type="text" id="customQuestion" placeholder="オリジナルのテーマを入力…" />
+      <button class="primary ghost" id="setCustomBtn">設定する</button>
+      <button class="danger" id="clearQBtn">テーマをクリア</button>
+    </div>
+  </div>
+
+  <h2 class="section">グループ設定</h2>
   <div class="controls">
     <label for="numGroupsSelect">グループ数:</label>
     <select id="numGroupsSelect">
@@ -66,7 +99,7 @@
   <div class="groups" id="groupCards"></div>
 
   <table>
-    <thead><tr><th>タグ</th><th>グループ</th><th>移動</th></tr></thead>
+    <thead><tr><th>タグ</th><th>気分</th><th>グループ</th><th>移動</th></tr></thead>
     <tbody id="roster"></tbody>
   </table>
 
@@ -81,6 +114,30 @@
   const numGroupsSelect = document.getElementById("numGroupsSelect");
   const resetBtn = document.getElementById("resetBtn");
 
+  // Drafted conversation-starter questions — edit this list freely.
+  const QUESTION_PRESETS = [
+    "好きな飲み物は？",
+    "最近ハマっていることは？",
+    "休日は何をして過ごしていますか？",
+    "好きな音楽のジャンルは？",
+    "好きな映画やドラマは？",
+    "今まで行った中で好きな旅行先は？",
+    "好きな食べ物、または苦手な食べ物は？",
+    "最近見て良かったものは？（映画・本・SNSなど）",
+    "もし何でも一つ叶うとしたら？",
+    "東京で好きな場所は？",
+    "ペットを飼うなら何を飼いたい？",
+    "今年挑戦したいことは？",
+  ];
+
+  const presetSelect = document.getElementById("questionPreset");
+  QUESTION_PRESETS.forEach((q) => {
+    const opt = document.createElement("option");
+    opt.value = q;
+    opt.textContent = q;
+    presetSelect.appendChild(opt);
+  });
+
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/?admin=1&key=${encodeURIComponent(key)}`);
 
@@ -94,20 +151,52 @@
     if (msg.type === "adminState") render(msg);
   };
 
+  document.getElementById("setPresetBtn").addEventListener("click", () => {
+    if (presetSelect.value) sendQuestion(presetSelect.value);
+  });
+  document.getElementById("randomBtn").addEventListener("click", () => {
+    const pick = QUESTION_PRESETS[Math.floor(Math.random() * QUESTION_PRESETS.length)];
+    sendQuestion(pick);
+  });
+  document.getElementById("setCustomBtn").addEventListener("click", () => {
+    const input = document.getElementById("customQuestion");
+    if (input.value.trim()) {
+      sendQuestion(input.value.trim());
+      input.value = "";
+    }
+  });
+  document.getElementById("clearQBtn").addEventListener("click", () => {
+    sendQuestion("");
+  });
+
+  function sendQuestion(text) {
+    ws.send(JSON.stringify({ type: "setQuestion", text }));
+  }
+
   numGroupsSelect.addEventListener("change", () => {
     ws.send(JSON.stringify({ type: "setNumGroups", value: parseInt(numGroupsSelect.value, 10) }));
   });
 
   resetBtn.addEventListener("click", () => {
-    if (confirm("全員の参加状態をリセットしますか？（次のイベント前などに使用）")) {
+    if (confirm("全員の参加状態とテーマをリセットしますか？（次のイベント前などに使用）")) {
       ws.send(JSON.stringify({ type: "reset" }));
     }
   });
 
   const ALL_GROUPS = ["apple", "banana", "fox", "bear"];
+  const VIBE_LABELS = { offer: "🍒差し出す", greet: "👋あいさつ", nice: "👍いいね", rest: "☕ひと休み" };
 
   function render(state) {
     numGroupsSelect.value = state.numGroups;
+
+    const qDisplay = document.getElementById("currentQDisplay");
+    if (state.question && state.question.length > 0) {
+      qDisplay.textContent = state.question;
+      qDisplay.classList.remove("empty");
+    } else {
+      qDisplay.textContent = "（まだ設定されていません）";
+      qDisplay.classList.add("empty");
+    }
 
     groupCardsEl.innerHTML = "";
     for (const [key, g] of Object.entries(state.groups)) {
@@ -126,6 +215,7 @@
       ).join("");
       tr.innerHTML = `
         <td>${person.tag}</td>
+        <td>${VIBE_LABELS[person.vibe] || "-"}</td>
         <td>${person.group || "-"}</td>
         <td><select class="move-select" data-token="${person.token}">${options}</select></td>
       `;

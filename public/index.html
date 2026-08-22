@@ -37,7 +37,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 14px;
   }
-  .obj-btn {
+  .vibe-btn {
     border: none;
     border-radius: 20px;
     background: white;
@@ -49,13 +49,12 @@
     gap: 8px;
     font-size: 0.95rem;
     color: var(--ink);
-    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   }
-  .obj-btn:active { transform: scale(0.96); }
-  .obj-btn .emoji { font-size: 2.4rem; }
-  .obj-btn .count { font-size: 0.75rem; color: #999; }
-  .obj-btn.full { opacity: 0.45; }
-  .obj-btn.inactive { display: none; }
+  .vibe-btn:active { transform: scale(0.96); }
+  /* Placeholder emoji icons — swap for the character PNGs later.
+     Each .vibe-btn img would replace the .emoji span 1:1. */
+  .vibe-btn .emoji { font-size: 2.4rem; }
+  .vibe-btn .vibe-name { font-size: 0.8rem; color: #888; }
 
   #result {
     display: none;
@@ -68,9 +67,32 @@
   #result .big-emoji { font-size: 3.2rem; margin-bottom: 6px; }
   #result h2 { margin: 4px 0 2px; font-size: 1.15rem; }
   #result .tag { color: var(--sky-deep); font-weight: 600; }
-  #result .note { margin-top: 10px; font-size: 0.85rem; color: #999; }
-  #result .members-count { margin-top: 18px; font-size: 0.85rem; color: #666; }
-  #result .members-count b { color: var(--ink); font-size: 1.1rem; }
+  #result .vibe-line { margin-top: 6px; font-size: 0.85rem; color: #999; }
+
+  #questionBox {
+    display: none;
+    margin-top: 18px;
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 14px 16px;
+    text-align: left;
+  }
+  #questionBox .label { font-size: 0.7rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
+  #questionBox .q-text { font-size: 1rem; margin-top: 4px; line-height: 1.5; }
+
+  .members-count { margin-top: 18px; font-size: 0.85rem; color: #666; }
+  .members-count b { color: var(--ink); font-size: 1.1rem; }
+
+  #chooseAgainBtn {
+    margin-top: 22px;
+    border: 1px solid #ddd;
+    background: white;
+    border-radius: 999px;
+    padding: 10px 20px;
+    font-size: 0.85rem;
+    color: #777;
+  }
+  #chooseAgainBtn:active { transform: scale(0.97); }
 
   .status { margin-top: 20px; font-size: 0.75rem; color: #b5b5b5; text-align: center; }
 </style>
@@ -79,34 +101,44 @@
   <header>
     <div class="rainbow-bar"></div>
     <h1>Not Alone Cafe</h1>
-    <div class="sub">好きなものをひとつタップして、グループに参加しよう</div>
+    <div class="sub">今の気分をひとつタップして、グループに参加しよう</div>
   </header>
 
   <div id="stage">
     <div class="grid" id="choices">
-      <button class="obj-btn" data-obj="apple"><span class="emoji">🍎</span>Apple<span class="count"></span></button>
-      <button class="obj-btn" data-obj="banana"><span class="emoji">🍌</span>Banana<span class="count"></span></button>
-      <button class="obj-btn" data-obj="fox"><span class="emoji">🦊</span>Fox<span class="count"></span></button>
-      <button class="obj-btn" data-obj="bear"><span class="emoji">🐻</span>Bear<span class="count"></span></button>
+      <!-- Placeholder vibes based on the mascot's pose set. Swap .emoji spans
+           for <img src="..."> of the character PNGs once ready. -->
+      <button class="vibe-btn" data-vibe="offer"><span class="emoji">🍒</span>差し出す<span class="vibe-name"></span></button>
+      <button class="vibe-btn" data-vibe="greet"><span class="emoji">👋</span>あいさつ<span class="vibe-name"></span></button>
+      <button class="vibe-btn" data-vibe="nice"><span class="emoji">👍</span>いいね<span class="vibe-name"></span></button>
+      <button class="vibe-btn" data-vibe="rest"><span class="emoji">☕</span>ひと休み<span class="vibe-name"></span></button>
     </div>
 
     <div id="result">
       <div class="big-emoji" id="resultEmoji">🎉</div>
       <h2>ようこそ！</h2>
       <div>あなたは <span class="tag" id="resultGroup">-</span> グループ</div>
-      <div class="note" id="reassignNote" style="display:none;">選んだグループが満員だったので、こちらに移動しました</div>
+      <div class="vibe-line" id="resultVibe"></div>
+
+      <div id="questionBox">
+        <div class="label">今のディスカッションテーマ</div>
+        <div class="q-text" id="questionText"></div>
+      </div>
+
       <div class="members-count">現在のメンバー: <b id="resultCount">-</b> 人</div>
+      <button id="chooseAgainBtn">別の気分を選びなおす</button>
     </div>
   </div>
 
   <div class="status" id="status">接続中…</div>
 
 <script>
+  const STORAGE_KEY = "nac_token";
   const statusEl = document.getElementById("status");
   const choicesEl = document.getElementById("choices");
   const resultEl = document.getElementById("result");
 
-  let token = sessionStorage.getItem("nac_token");
+  let token = localStorage.getItem(STORAGE_KEY);
   let myGroup = null;
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -124,17 +156,17 @@
 
     if (msg.type === "welcome") {
       token = msg.token;
-      sessionStorage.setItem("nac_token", token);
+      localStorage.setItem(STORAGE_KEY, token);
       statusEl.textContent = `あなたのタグ: ${msg.tag}`;
       if (msg.group) {
         myGroup = msg.group;
-        showResult(msg.group, false);
+        showResult(msg.group, msg.vibe, msg.question);
       }
     }
 
     if (msg.type === "assigned") {
       myGroup = msg.group;
-      showResult(msg.group, msg.reassigned);
+      showResult(msg.group, msg.vibe, msg.question);
     }
 
     if (msg.type === "state") {
@@ -142,33 +174,47 @@
       if (myGroup && msg.groups[myGroup]) {
         document.getElementById("resultCount").textContent = msg.groups[myGroup].count;
       }
+      updateQuestion(msg.question);
     }
   };
 
   choicesEl.addEventListener("click", (e) => {
-    const btn = e.target.closest(".obj-btn");
-    if (!btn || btn.classList.contains("full")) return;
-    ws.send(JSON.stringify({ type: "choose", object: btn.dataset.obj }));
+    const btn = e.target.closest(".vibe-btn");
+    if (!btn) return;
+    ws.send(JSON.stringify({ type: "choose", vibe: btn.dataset.vibe }));
+  });
+
+  document.getElementById("chooseAgainBtn").addEventListener("click", () => {
+    resultEl.style.display = "none";
+    choicesEl.style.display = "grid";
   });
 
   function updateChoiceButtons(groups) {
-    document.querySelectorAll(".obj-btn").forEach((btn) => {
-      const g = groups[btn.dataset.obj];
-      if (!g) return;
-      btn.classList.toggle("inactive", !g.active);
-      btn.classList.toggle("full", g.count >= g.capacity);
-      btn.querySelector(".count").textContent = `${g.count} 人`;
-    });
+    // Vibe buttons no longer show fullness — that's a group-level concept now,
+    // and vibes are independent of group. Left in place for future per-vibe
+    // popularity display if wanted later.
   }
 
   const emojiFor = { apple: "🍎", banana: "🍌", fox: "🦊", bear: "🐻" };
+  const vibeNameFor = { offer: "差し出す", greet: "あいさつ", nice: "いいね", rest: "ひと休み" };
 
-  function showResult(group, reassigned) {
+  function showResult(group, vibe, question) {
     choicesEl.style.display = "none";
     resultEl.style.display = "block";
     document.getElementById("resultEmoji").textContent = emojiFor[group] || "🎉";
     document.getElementById("resultGroup").textContent = group;
-    document.getElementById("reassignNote").style.display = reassigned ? "block" : "none";
+    document.getElementById("resultVibe").textContent = vibe ? `気分: ${vibeNameFor[vibe] || vibe}` : "";
+    updateQuestion(question);
+  }
+
+  function updateQuestion(question) {
+    const box = document.getElementById("questionBox");
+    if (question && question.length > 0) {
+      box.style.display = "block";
+      document.getElementById("questionText").textContent = question;
+    } else {
+      box.style.display = "none";
+    }
   }
 </script>
 </body>
