@@ -224,7 +224,7 @@
       <img class="result-char" id="resultCharImg" src="/img/yellow.png" alt="" />
       <h2 id="resultHeading">ようこそ！</h2>
       <div class="team-line" id="resultLine">あなたはチーム<b>A</b>です　気分: イェロー</div>
-      <div class="team-line" id="waitingNote" style="display:none; color:#999; font-size:0.85rem;">まもなくディスカッションが始まります。<br>少々お待ちください！</div>
+      <div class="team-line" id="waitingNote" style="display:none; color:#999; font-size:0.85rem;">まもなくディスカッションが始まります。少々お待ちください！</div>
 
       <div id="questionBox">
         <div class="label">今のディスカッションテーマ</div>
@@ -493,7 +493,12 @@
     const active = question && question.length > 0;
     document.getElementById("countsBlock").style.display = active ? "block" : "none";
     document.getElementById("resultLine").style.display = active ? "block" : "none";
-    document.getElementById("waitingNote").style.display = active ? "none" : "block";
+    const waitingNote = document.getElementById("waitingNote");
+    waitingNote.style.display = active ? "none" : "block";
+    if (!active) {
+      waitingNote.innerHTML =
+        `まもなくディスカッションが始まります。少々お待ちください！<br>気分: ${vibeNameFor[myVibe] || myVibe || "-"}`;
+    }
   }
 
   function updateQuestion(question) {
