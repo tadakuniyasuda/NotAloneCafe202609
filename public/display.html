@@ -119,7 +119,8 @@
   .team-card .count-label { font-size: clamp(0.6rem, 1.2vh, 0.75rem); color: #999; }
 
   /* --- Pre-discussion panel: shown INSTEAD of team cards before the first
-     discussion theme is set (mirrors the player page's waiting state). --- */
+     discussion theme is set, and also during the "event over" wrap-up
+     message, to spotlight the shop and next event date. --- */
   .predisc-panel {
     flex: 1;
     min-height: 0;
@@ -132,21 +133,31 @@
   }
   .predisc-panel .tshirt-title { font-weight: 700; font-size: clamp(0.85rem, 2vh, 1.05rem); }
   .predisc-panel .tshirt-sub { font-size: clamp(0.6rem, 1.3vh, 0.78rem); color: #999; }
-  .predisc-panel .tshirt-row {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: center;
-    gap: clamp(4px, 1vw, 8px);
-    max-height: 55%;
-  }
-  .predisc-panel .tshirt-row img {
-    height: clamp(50px, 15vh, 120px);
-    width: auto;
-    object-fit: contain;
-    border-radius: 8px;
+
+  /* Single rotating slider — one fixed-size box, one image at a time. This is
+     deliberately simpler than a side-by-side row: product photos here have
+     inconsistent (wide) aspect ratios, so a wrapping row breaks unpredictably
+     across screen sizes, while a fixed box never does. */
+  .predisc-panel .tshirt-slider {
+    position: relative;
+    width: clamp(140px, 22vh, 220px);
+    aspect-ratio: 1 / 1;
+    border-radius: 14px;
+    overflow: hidden;
     background: white;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
   }
+  .predisc-panel .tshirt-slider img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: none;
+  }
+  .predisc-panel .tshirt-slider img.active { display: block; }
+  .predisc-panel .tshirt-dots { display: flex; justify-content: center; gap: 6px; }
+  .predisc-panel .tshirt-dots span { width: 6px; height: 6px; border-radius: 50%; background: #ddd; }
+  .predisc-panel .tshirt-dots span.active { background: var(--sky-deep); }
+
   .predisc-panel .next-event {
     font-size: clamp(0.75rem, 1.8vh, 1rem);
     font-weight: 600;
@@ -245,12 +256,13 @@
       <div class="predisc-panel" id="preDiscussionPanel" style="display:none;">
         <div class="tshirt-title">オリジナルTシャツ on Sale!</div>
         <div class="tshirt-sub">（利益はこのイベントの活動に使わせていただきます！）</div>
-        <div class="tshirt-row">
-          <img src="/img/tshirt1.png" alt="オリジナルTシャツ1" />
+        <div class="tshirt-slider" id="displayTshirtSlider">
+          <img src="/img/tshirt1.png" class="active" alt="オリジナルTシャツ1" />
           <img src="/img/tshirt2.png" alt="オリジナルTシャツ2" />
           <img src="/img/tshirt3.png" alt="オリジナルTシャツ3" />
           <img src="/img/tshirt4.png" alt="オリジナルTシャツ4" />
         </div>
+        <div class="tshirt-dots" id="displayTshirtDots"></div>
         <div class="next-event">次回は10月4日（日）14:00〜17:00 九州男で開催！</div>
       </div>
 
@@ -338,9 +350,14 @@
     previousQuestion = state.question;
 
     const hasQuestion = state.question && state.question.length > 0;
+    const eventOver = !!state.eventOver;
+    const showPromo = eventOver || !hasQuestion;
 
     const qEl = document.getElementById("questionText");
-    if (hasQuestion) {
+    if (eventOver) {
+      qEl.textContent = "本日はご参加ありがとうございました！";
+      qEl.classList.add("empty");
+    } else if (hasQuestion) {
       qEl.textContent = state.question;
       qEl.classList.remove("empty");
     } else {
@@ -348,12 +365,13 @@
       qEl.classList.add("empty");
     }
 
-    // Before the first discussion starts, show the t-shirt/next-event panel
-    // instead of team headcounts — team assignments aren't meaningful yet.
-    document.getElementById("teamsGrid").style.display = hasQuestion ? "grid" : "none";
-    document.getElementById("preDiscussionPanel").style.display = hasQuestion ? "none" : "flex";
+    // Before the first discussion starts, AND during the "event over" wrap-up
+    // message, show the t-shirt/next-event panel instead of team headcounts —
+    // team assignments aren't the point in either of those moments.
+    document.getElementById("teamsGrid").style.display = showPromo ? "none" : "grid";
+    document.getElementById("preDiscussionPanel").style.display = showPromo ? "flex" : "none";
 
-    if (hasQuestion) {
+    if (!showPromo) {
       const grid = document.getElementById("teamsGrid");
       grid.innerHTML = "";
       for (const [key, t] of Object.entries(state.teams)) {
@@ -375,6 +393,34 @@
       nextEl.textContent = "";
     }
   }
+
+  // --- T-shirt slider (display page): identical mechanism to the player
+  // page's slider — one fixed-size box, auto-rotating, dot indicators. ---
+  (function setupDisplayTshirtSlider() {
+    const slider = document.getElementById("displayTshirtSlider");
+    const dotsEl = document.getElementById("displayTshirtDots");
+    if (!slider || !dotsEl) return;
+    const images = slider.querySelectorAll("img");
+    if (images.length === 0) return;
+
+    images.forEach((_, i) => {
+      const dot = document.createElement("span");
+      if (i === 0) dot.classList.add("active");
+      dotsEl.appendChild(dot);
+    });
+    const dots = dotsEl.querySelectorAll("span");
+
+    let current = 0;
+    function show(index) {
+      images.forEach((img, i) => img.classList.toggle("active", i === index));
+      dots.forEach((dot, i) => dot.classList.toggle("active", i === index));
+      current = index;
+    }
+
+    setInterval(() => {
+      show((current + 1) % images.length);
+    }, 3000);
+  })();
 </script>
 </body>
 </html>
