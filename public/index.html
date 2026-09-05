@@ -133,6 +133,13 @@
     border-bottom: 1px solid #f0f0f0;
   }
   .link-list a:last-child { border-bottom: none; }
+  .link-list-note {
+    display: block;
+    font-size: 0.9rem;
+    color: #888;
+    padding: 6px 0;
+  }
+  .link-list-note:not(:last-child) { border-bottom: 1px solid #f0f0f0; }
 
   .tshirt-slider {
     position: relative;
@@ -183,7 +190,7 @@
 
     <div id="result">
       <img class="result-char" id="resultCharImg" src="/img/yellow.png" alt="" />
-      <h2>ようこそ！</h2>
+      <h2 id="resultHeading">ようこそ！</h2>
       <div class="team-line" id="resultLine">あなたはチーム<b>A</b>です　気分: イェロー</div>
 
       <div id="questionBox">
@@ -191,8 +198,10 @@
         <div class="q-text" id="questionText"></div>
       </div>
 
-      <div class="members-count">現在のメンバー: <b id="resultCount">-</b> 人</div>
-      <div class="members-count">参加者数: <b id="totalCount">-</b> 人</div>
+      <div id="countsBlock">
+        <div class="members-count">現在のメンバー: <b id="resultCount">-</b> 人</div>
+        <div class="members-count">参加者数: <b id="totalCount">-</b> 人</div>
+      </div>
       <button id="chooseAgainBtn">別の気分を選びなおす</button>
     </div>
   </div>
@@ -232,7 +241,19 @@
         <a href="https://x.com/bar_kusuo" target="_blank" rel="noopener">九州男</a>
       </div>
     </div>
+
+    <div class="info-card">
+      <div class="info-title">SNS</div>
+      <div class="link-list">
+        <a href="https://www.meetup.com/members/281841757/" target="_blank" rel="noopener">Facebook</a>
+        <a href="https://notalonecafe.jp/" target="_blank" rel="noopener">HP</a>
+        <a href="https://x.com/NotAloneCafe" target="_blank" rel="noopener">X</a>
+        <a href="https://www.instagram.com/notalonecafevideos/" target="_blank" rel="noopener">Instagram</a>
+        <span class="link-list-note">Join our Line Group（スタッフに聞いてね！）</span>
+      </div>
+    </div>
   </footer>
+
 
   <div class="status" id="status">接続中…</div>
   <audio id="notifSound" src="/sound/notification.mp3" preload="auto"></audio>
@@ -246,6 +267,8 @@
 
   let token = localStorage.getItem(STORAGE_KEY);
   let myGroup = null;
+  let myVibe = null;
+  let eventOver = false;
   let awaitingOwnChoice = false; // true only right after the user taps a vibe themselves
 
   function playNotifSound() {
@@ -274,14 +297,17 @@
       token = msg.token;
       localStorage.setItem(STORAGE_KEY, token);
       statusEl.textContent = `あなたのタグ: ${msg.tag}`;
+      if (typeof msg.eventOver === "boolean") eventOver = msg.eventOver;
       if (msg.group) {
         myGroup = msg.group;
+        myVibe = msg.vibe;
         showResult(msg.group, msg.vibe, msg.question);
       }
     }
 
     if (msg.type === "assigned") {
       myGroup = msg.group;
+      myVibe = msg.vibe;
       if (awaitingOwnChoice) {
         // This "assigned" was triggered by the user's own tap — they can already
         // see the result on screen, no need to alert them with a sound.
@@ -300,6 +326,8 @@
       // Snap back to the choice screen and get a fresh identity immediately,
       // instead of silently freezing on stale info.
       myGroup = null;
+      myVibe = null;
+      eventOver = false;
       localStorage.removeItem(STORAGE_KEY);
       token = null;
       resultEl.style.display = "none";
@@ -309,6 +337,10 @@
     }
 
     if (msg.type === "state") {
+      if (typeof msg.eventOver === "boolean" && msg.eventOver !== eventOver) {
+        eventOver = msg.eventOver;
+        if (myGroup) renderResultScreen(); // re-render immediately if event-over status changed mid-view
+      }
       if (myGroup && msg.teams && msg.teams[myGroup]) {
         document.getElementById("resultCount").textContent = msg.teams[myGroup].count;
       }
@@ -318,6 +350,7 @@
           .reduce((sum, t) => sum + t.count, 0);
         document.getElementById("totalCount").textContent = total;
       }
+      updateCountsVisibility(msg.question);
       updateQuestion(msg.question);
     }
   };
@@ -337,16 +370,51 @@
   const vibeNameFor = { yellow: "イェロー", pink: "ピンク", green: "グリーン", blue: "ブルー" };
   const vibeImgFor = { yellow: "/img/yellow.png", pink: "/img/pink.png", green: "/img/green.png", blue: "/img/blue.png" };
 
+  let lastQuestion = "";
+
   function showResult(group, vibe, question) {
     choicesEl.style.display = "none";
     resultEl.style.display = "block";
-    document.getElementById("resultCharImg").src = vibeImgFor[vibe] || "/img/yellow.png";
+    lastQuestion = question || "";
+    renderResultScreen();
+  }
+
+  // Single source of truth for what the result screen shows — normal welcome,
+  // or the post-event thank-you message. Called whenever group/vibe/eventOver
+  // changes, so the two never fall out of sync.
+  function renderResultScreen() {
+    document.getElementById("resultCharImg").src = vibeImgFor[myVibe] || "/img/yellow.png";
+
+    if (eventOver) {
+      document.getElementById("resultHeading").style.display = "none";
+      document.getElementById("chooseAgainBtn").style.display = "none";
+      document.getElementById("countsBlock").style.display = "none";
+      document.getElementById("questionBox").style.display = "none";
+      document.getElementById("resultLine").innerHTML =
+        `今日は参加してくれてありがとう！<br>次回は10月4日（日）14:00〜17:00 九州男で開催！<br>また来てね！<br>` +
+        `よろしければアンケートにお答えください。<br>今日選んだ気分は: ${vibeNameFor[myVibe] || myVibe || "-"}`;
+      return;
+    }
+
+    document.getElementById("resultHeading").style.display = "";
+    document.getElementById("chooseAgainBtn").style.display = "";
     document.getElementById("resultLine").innerHTML =
-      `あなたはチーム<b>${group}</b>です　気分: ${vibeNameFor[vibe] || vibe || "-"}`;
-    updateQuestion(question);
+      `あなたはチーム<b>${myGroup}</b>です　気分: ${vibeNameFor[myVibe] || myVibe || "-"}`;
+    updateCountsVisibility(lastQuestion);
+    updateQuestion(lastQuestion);
+  }
+
+  // Member counts only make sense once a discussion round has actually started —
+  // hide them for anyone who joins early, before the first theme is set.
+  function updateCountsVisibility(question) {
+    if (eventOver) return; // renderResultScreen already hides everything in that case
+    const block = document.getElementById("countsBlock");
+    block.style.display = (question && question.length > 0) ? "block" : "none";
   }
 
   function updateQuestion(question) {
+    if (eventOver) return;
+    lastQuestion = question || "";
     const box = document.getElementById("questionBox");
     if (question && question.length > 0) {
       box.style.display = "block";

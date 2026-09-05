@@ -48,6 +48,7 @@ let numTeams = 4; // admin-adjustable, 1-4
 let currentQuestion = "";
 let autoEnabled = true;
 let eventWindow = { start: "14:00", end: "17:00" };
+let eventOver = false; // admin-set "Event over" state — replaces the player's welcome message
 
 // Schedule: list of { id, time: "HH:MM", fired: boolean }. Admin-editable.
 let schedule = [
@@ -223,6 +224,7 @@ function publicState() {
     schedule,
     autoEnabled,
     eventWindow,
+    eventOver,
   };
 }
 
@@ -241,6 +243,7 @@ function adminState() {
     schedule,
     autoEnabled,
     eventWindow,
+    eventOver,
     questionPresets: QUESTION_PRESETS,
     roster,
   };
@@ -393,12 +396,22 @@ function handleAdminMessage(raw) {
 
   if (msg.type === "setQuestion" && typeof msg.text === "string") {
     currentQuestion = msg.text.trim();
+    // Any theme change (including Clear) implies the event is running again —
+    // this is also what lets admin repeatedly test the "Event over" screen.
+    eventOver = false;
+    broadcastState();
+    return;
+  }
+
+  if (msg.type === "setEventOver" && typeof msg.value === "boolean") {
+    eventOver = msg.value;
     broadcastState();
     return;
   }
 
   if (msg.type === "shuffleNow") {
     currentQuestion = QUESTION_PRESETS[Math.floor(Math.random() * QUESTION_PRESETS.length)];
+    eventOver = false;
     shuffleAll();
     broadcastState();
     return;
@@ -438,6 +451,7 @@ function handleAdminMessage(raw) {
       }
     }
     currentQuestion = "";
+    eventOver = false;
     pairHistory.clear();
     schedule = schedule.map((s) => ({ ...s, fired: false }));
     broadcastState();
