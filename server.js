@@ -52,9 +52,9 @@ let eventWindow = { start: "14:00", end: "17:00" };
 // Schedule: list of { id, time: "HH:MM", fired: boolean }. Admin-editable.
 let schedule = [
   { id: "s1", time: "15:00", fired: false },
-  { id: "s2", time: "15:30", fired: false },
-  { id: "s3", time: "16:00", fired: false },
-  { id: "s4", time: "16:30", fired: false },
+  { id: "s2", time: "15:15", fired: false },
+  { id: "s3", time: "15:30", fired: false },
+  { id: "s4", time: "15:45", fired: false },
 ];
 
 // token -> { tag, group, vibe, ws, isAdmin, isDisplay, connected }
@@ -366,6 +366,20 @@ function handleAdminMessage(raw) {
     const c = clients.get(msg.token);
     if (c && !c.isAdmin && !c.isDisplay && ALL_TEAMS.includes(msg.toGroup)) {
       c.group = msg.toGroup;
+      // Push the change directly to that person's own phone — without this,
+      // their screen kept showing the old team until they manually refreshed,
+      // since a manual move never triggered their own "assigned" update.
+      if (c.connected && c.ws.readyState === WebSocket.OPEN) {
+        c.ws.send(
+          JSON.stringify({
+            type: "assigned",
+            group: c.group,
+            label: TEAM_LABELS[c.group],
+            vibe: c.vibe,
+            question: currentQuestion,
+          })
+        );
+      }
       broadcastState();
     }
     return;
@@ -412,8 +426,16 @@ function handleAdminMessage(raw) {
   }
 
   if (msg.type === "reset") {
+    // Tell every connected attendee directly, BEFORE deleting their records —
+    // otherwise their phone just freezes on stale info forever, since once
+    // deleted the server has no way left to reach them with a normal update.
     for (const [token, c] of clients.entries()) {
-      if (!c.isAdmin && !c.isDisplay) clients.delete(token);
+      if (!c.isAdmin && !c.isDisplay) {
+        if (c.connected && c.ws.readyState === WebSocket.OPEN) {
+          c.ws.send(JSON.stringify({ type: "reset" }));
+        }
+        clients.delete(token);
+      }
     }
     currentQuestion = "";
     pairHistory.clear();

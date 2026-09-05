@@ -133,6 +133,37 @@
     border-bottom: 1px solid #f0f0f0;
   }
   .link-list a:last-child { border-bottom: none; }
+
+  .tshirt-slider {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    background: #ffffff;
+  }
+  .tshirt-slider a { display: block; width: 100%; height: 100%; }
+  .tshirt-slider img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: none;
+  }
+  .tshirt-slider img.active { display: block; }
+  .tshirt-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .tshirt-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ddd;
+  }
+  .tshirt-dots span.active { background: var(--sky-deep); }
 </style>
 </head>
 <body>
@@ -161,6 +192,7 @@
       </div>
 
       <div class="members-count">現在のメンバー: <b id="resultCount">-</b> 人</div>
+      <div class="members-count">参加者数: <b id="totalCount">-</b> 人</div>
       <button id="chooseAgainBtn">別の気分を選びなおす</button>
     </div>
   </div>
@@ -173,8 +205,22 @@
 
     <div class="info-card">
       <div class="info-title">オリジナルグッズ</div>
+      <div class="tshirt-slider" id="tshirtSlider">
+        <a href="https://juanyang.stores.jp/" target="_blank" rel="noopener">
+          <img src="/img/tshirt1.png" class="active" alt="オリジナルTシャツ1" />
+          <img src="/img/tshirt2.png" alt="オリジナルTシャツ2" />
+          <img src="/img/tshirt3.png" alt="オリジナルTシャツ3" />
+          <img src="/img/tshirt4.png" alt="オリジナルTシャツ4" />
+        </a>
+      </div>
+      <div class="tshirt-dots" id="tshirtDots"></div>
       <div class="info-main"><a href="https://juanyang.stores.jp/" target="_blank" rel="noopener">オリジナルTシャツはこちら！</a></div>
       <div class="info-sub">利益はこのイベントの活動に使わせていただきます！</div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-title">アンケート</div>
+      <div class="info-main"><a href="https://docs.google.com/forms/d/e/1FAIpQLSdHio_Uw9qAVaGpSHqAwSwckm50Gc6G0uIRmTgctMbUSUzz_w/viewform?usp=publish-editor" target="_blank" rel="noopener">アンケートにご協力をお願いします。</a></div>
     </div>
 
     <div class="info-card">
@@ -249,9 +295,28 @@
       showResult(msg.group, msg.vibe, msg.question);
     }
 
+    if (msg.type === "reset") {
+      // Admin hit 全員リセット — our old team/tag no longer exists server-side.
+      // Snap back to the choice screen and get a fresh identity immediately,
+      // instead of silently freezing on stale info.
+      myGroup = null;
+      localStorage.removeItem(STORAGE_KEY);
+      token = null;
+      resultEl.style.display = "none";
+      choicesEl.style.display = "grid";
+      statusEl.textContent = "リセットされました。もう一度選んでください。";
+      ws.send(JSON.stringify({ type: "init", token: null }));
+    }
+
     if (msg.type === "state") {
       if (myGroup && msg.teams && msg.teams[myGroup]) {
         document.getElementById("resultCount").textContent = msg.teams[myGroup].count;
+      }
+      if (msg.teams) {
+        const total = Object.values(msg.teams)
+          .filter((t) => t.active)
+          .reduce((sum, t) => sum + t.count, 0);
+        document.getElementById("totalCount").textContent = total;
       }
       updateQuestion(msg.question);
     }
@@ -290,6 +355,34 @@
       box.style.display = "none";
     }
   }
+
+  // --- T-shirt slider: auto-rotates through the product photos, whole image
+  // links to the shop. Dots are just visual indicators, not clickable. ---
+  (function setupTshirtSlider() {
+    const slider = document.getElementById("tshirtSlider");
+    const dotsEl = document.getElementById("tshirtDots");
+    if (!slider || !dotsEl) return;
+    const images = slider.querySelectorAll("img");
+    if (images.length === 0) return;
+
+    images.forEach((_, i) => {
+      const dot = document.createElement("span");
+      if (i === 0) dot.classList.add("active");
+      dotsEl.appendChild(dot);
+    });
+    const dots = dotsEl.querySelectorAll("span");
+
+    let current = 0;
+    function show(index) {
+      images.forEach((img, i) => img.classList.toggle("active", i === index));
+      dots.forEach((dot, i) => dot.classList.toggle("active", i === index));
+      current = index;
+    }
+
+    setInterval(() => {
+      show((current + 1) % images.length);
+    }, 3000);
+  })();
 </script>
 </body>
 </html>
