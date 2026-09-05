@@ -118,6 +118,41 @@
   .team-card .count { font-size: clamp(1.2rem, 3.6vh, 1.8rem); font-weight: 700; color: var(--sky-deep); line-height: 1.2; }
   .team-card .count-label { font-size: clamp(0.6rem, 1.2vh, 0.75rem); color: #999; }
 
+  /* --- Pre-discussion panel: shown INSTEAD of team cards before the first
+     discussion theme is set (mirrors the player page's waiting state). --- */
+  .predisc-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(4px, 1vh, 10px);
+    text-align: center;
+  }
+  .predisc-panel .tshirt-title { font-weight: 700; font-size: clamp(0.85rem, 2vh, 1.05rem); }
+  .predisc-panel .tshirt-sub { font-size: clamp(0.6rem, 1.3vh, 0.78rem); color: #999; }
+  .predisc-panel .tshirt-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: clamp(4px, 1vw, 8px);
+    max-height: 55%;
+  }
+  .predisc-panel .tshirt-row img {
+    height: clamp(50px, 15vh, 120px);
+    width: auto;
+    object-fit: contain;
+    border-radius: 8px;
+    background: white;
+  }
+  .predisc-panel .next-event {
+    font-size: clamp(0.75rem, 1.8vh, 1rem);
+    font-weight: 600;
+    margin-top: clamp(4px, 1vh, 8px);
+  }
+
   .next-shuffle { font-size: clamp(0.65rem, 1.5vh, 0.85rem); color: #888; text-align: center; flex-shrink: 0; }
 
   .status {
@@ -144,9 +179,41 @@
   }
   #soundOverlay .icon { font-size: 3rem; }
   #soundOverlay .msg { font-size: 1.1rem; max-width: 380px; padding: 0 20px; }
+
+  #connOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(43,43,43,0.94);
+    color: white;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    z-index: 101;
+    padding: 20px;
+  }
+  #connOverlay .icon { font-size: 2.4rem; }
+  #connOverlay .msg { font-size: 1rem; line-height: 1.6; max-width: 320px; }
+  #connOverlay button {
+    margin-top: 6px;
+    padding: 10px 22px;
+    border-radius: 999px;
+    border: none;
+    background: white;
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
 </style>
 </head>
 <body>
+  <div id="connOverlay">
+    <div class="icon">📡</div>
+    <div class="msg">接続が切れました。<br>自動で再接続しています…</div>
+    <button onclick="location.reload()">今すぐ再読み込み</button>
+  </div>
+
   <div id="soundOverlay">
     <div class="icon">🔔</div>
     <div class="msg">タップして通知音を有効にしてください<br><span style="opacity:0.7; font-size:0.9rem;">（イベント開始前に一度だけ）</span></div>
@@ -175,6 +242,18 @@
 
       <div class="teams-grid" id="teamsGrid"></div>
 
+      <div class="predisc-panel" id="preDiscussionPanel" style="display:none;">
+        <div class="tshirt-title">オリジナルTシャツ on Sale!</div>
+        <div class="tshirt-sub">（利益はこのイベントの活動に使わせていただきます！）</div>
+        <div class="tshirt-row">
+          <img src="/img/tshirt1.png" alt="オリジナルTシャツ1" />
+          <img src="/img/tshirt2.png" alt="オリジナルTシャツ2" />
+          <img src="/img/tshirt3.png" alt="オリジナルTシャツ3" />
+          <img src="/img/tshirt4.png" alt="オリジナルTシャツ4" />
+        </div>
+        <div class="next-event">次回は10月4日（日）14:00〜17:00 九州男で開催！</div>
+      </div>
+
       <div class="next-shuffle" id="nextShuffle"></div>
     </div>
   </div>
@@ -186,10 +265,16 @@
   const statusEl = document.getElementById("status");
   const notifSound = document.getElementById("notifSound");
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}/?display=1`);
 
+  let ws;
+  let heartbeatInterval = null;
+  let heartbeatTimeout = null;
+  let reconnectAttempts = 0;
   let previousQuestion = null;
   let soundUnlocked = false;
+
+  function showConnLost() { document.getElementById("connOverlay").style.display = "flex"; }
+  function hideConnLost() { document.getElementById("connOverlay").style.display = "none"; }
 
   const overlay = document.getElementById("soundOverlay");
   overlay.addEventListener("click", () => {
@@ -203,14 +288,45 @@
     });
   });
 
-  ws.onopen = () => { statusEl.textContent = "接続済み"; };
-  ws.onclose = () => { statusEl.textContent = "接続が切れました。再読み込みしてください。"; };
-  ws.onerror = () => { statusEl.textContent = "接続エラー"; };
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatInterval = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "ping" }));
+      heartbeatTimeout = setTimeout(() => { ws.close(); }, 5000);
+    }, 10000);
+  }
+  function stopHeartbeat() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+  }
 
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === "state") render(msg);
-  };
+  function connect() {
+    ws = new WebSocket(`${proto}//${location.host}/?display=1`);
+
+    ws.onopen = () => {
+      reconnectAttempts = 0;
+      hideConnLost();
+      statusEl.textContent = "接続済み";
+      startHeartbeat();
+    };
+    ws.onclose = () => {
+      stopHeartbeat();
+      statusEl.textContent = "接続が切れました。再接続しています…";
+      showConnLost();
+      reconnectAttempts++;
+      const delay = Math.min(2000 * reconnectAttempts, 10000);
+      setTimeout(connect, delay);
+    };
+    ws.onerror = () => { ws.close(); };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "pong") { if (heartbeatTimeout) clearTimeout(heartbeatTimeout); return; }
+      if (msg.type === "state") render(msg);
+    };
+  }
+  connect();
 
   function render(state) {
     if (previousQuestion !== null && state.question !== previousQuestion && state.question) {
@@ -221,8 +337,10 @@
     }
     previousQuestion = state.question;
 
+    const hasQuestion = state.question && state.question.length > 0;
+
     const qEl = document.getElementById("questionText");
-    if (state.question && state.question.length > 0) {
+    if (hasQuestion) {
       qEl.textContent = state.question;
       qEl.classList.remove("empty");
     } else {
@@ -230,14 +348,21 @@
       qEl.classList.add("empty");
     }
 
-    const grid = document.getElementById("teamsGrid");
-    grid.innerHTML = "";
-    for (const [key, t] of Object.entries(state.teams)) {
-      if (!t.active) continue;
-      const card = document.createElement("div");
-      card.className = "team-card";
-      card.innerHTML = `<h3>${t.label}</h3><div class="count">${t.count}</div><div class="count-label">人</div>`;
-      grid.appendChild(card);
+    // Before the first discussion starts, show the t-shirt/next-event panel
+    // instead of team headcounts — team assignments aren't meaningful yet.
+    document.getElementById("teamsGrid").style.display = hasQuestion ? "grid" : "none";
+    document.getElementById("preDiscussionPanel").style.display = hasQuestion ? "none" : "flex";
+
+    if (hasQuestion) {
+      const grid = document.getElementById("teamsGrid");
+      grid.innerHTML = "";
+      for (const [key, t] of Object.entries(state.teams)) {
+        if (!t.active) continue;
+        const card = document.createElement("div");
+        card.className = "team-card";
+        card.innerHTML = `<h3>${t.label}</h3><div class="count">${t.count}</div><div class="count-label">人</div>`;
+        grid.appendChild(card);
+      }
     }
 
     const nextEl = document.getElementById("nextShuffle");

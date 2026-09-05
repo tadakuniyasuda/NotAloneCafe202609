@@ -94,6 +94,32 @@
 
   .status { margin-top: 20px; font-size: 0.75rem; color: #b5b5b5; text-align: center; }
 
+  #connOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(43,43,43,0.94);
+    color: white;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    z-index: 200;
+    padding: 20px;
+  }
+  #connOverlay .icon { font-size: 2.4rem; }
+  #connOverlay .msg { font-size: 1rem; line-height: 1.6; max-width: 320px; }
+  #connOverlay button {
+    margin-top: 6px;
+    padding: 10px 22px;
+    border-radius: 999px;
+    border: none;
+    background: white;
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
+
   footer.info-footer {
     width: 100%;
     max-width: 420px;
@@ -174,6 +200,12 @@
 </style>
 </head>
 <body>
+  <div id="connOverlay">
+    <div class="icon">📡</div>
+    <div class="msg">接続が切れました。<br>自動で再接続しています…</div>
+    <button onclick="location.reload()">今すぐ再読み込み</button>
+  </div>
+
   <header>
     <div class="rainbow-bar"></div>
     <h1>Not Alone Cafe</h1>
@@ -192,6 +224,7 @@
       <img class="result-char" id="resultCharImg" src="/img/yellow.png" alt="" />
       <h2 id="resultHeading">ようこそ！</h2>
       <div class="team-line" id="resultLine">あなたはチーム<b>A</b>です　気分: イェロー</div>
+      <div class="team-line" id="waitingNote" style="display:none; color:#999; font-size:0.85rem;">まもなくディスカッションが始まります。少々お待ちください！</div>
 
       <div id="questionBox">
         <div class="label">今のディスカッションテーマ</div>
@@ -281,17 +314,60 @@
   }
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}`);
+  let ws;
+  let heartbeatInterval = null;
+  let heartbeatTimeout = null;
+  let reconnectAttempts = 0;
 
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: "init", token }));
-  };
+  function showConnLost() {
+    document.getElementById("connOverlay").style.display = "flex";
+  }
+  function hideConnLost() {
+    document.getElementById("connOverlay").style.display = "none";
+  }
 
-  ws.onclose = () => { statusEl.textContent = "接続が切れました。ページを再読み込みしてください。"; };
-  ws.onerror = () => { statusEl.textContent = "接続エラー"; };
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatInterval = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "ping" }));
+      // If no pong arrives in 5s, the connection is likely dead even though the
+      // browser hasn't fired "close" yet — this happens a lot after phone sleep,
+      // where the OS silently drops the socket without telling the page.
+      heartbeatTimeout = setTimeout(() => { ws.close(); }, 5000);
+    }, 10000);
+  }
+  function stopHeartbeat() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+  }
 
-  ws.onmessage = (event) => {
+  function connect() {
+    ws = new WebSocket(`${proto}//${location.host}`);
+
+    ws.onopen = () => {
+      reconnectAttempts = 0;
+      hideConnLost();
+      ws.send(JSON.stringify({ type: "init", token }));
+      startHeartbeat();
+    };
+
+    ws.onclose = () => {
+      stopHeartbeat();
+      showConnLost();
+      reconnectAttempts++;
+      const delay = Math.min(2000 * reconnectAttempts, 10000);
+      setTimeout(connect, delay);
+    };
+    ws.onerror = () => { ws.close(); };
+
+    ws.onmessage = handleMessage;
+  }
+
+  function handleMessage(event) {
     const msg = JSON.parse(event.data);
+
+    if (msg.type === "pong") { if (heartbeatTimeout) clearTimeout(heartbeatTimeout); return; }
 
     if (msg.type === "welcome") {
       token = msg.token;
@@ -350,10 +426,12 @@
           .reduce((sum, t) => sum + t.count, 0);
         document.getElementById("totalCount").textContent = total;
       }
-      updateCountsVisibility(msg.question);
+      updatePreDiscussionVisibility(msg.question);
       updateQuestion(msg.question);
     }
-  };
+  }
+
+  connect();
 
   choicesEl.addEventListener("click", (e) => {
     const btn = e.target.closest(".vibe-btn");
@@ -390,6 +468,8 @@
       document.getElementById("chooseAgainBtn").style.display = "none";
       document.getElementById("countsBlock").style.display = "none";
       document.getElementById("questionBox").style.display = "none";
+      document.getElementById("waitingNote").style.display = "none";
+      document.getElementById("resultLine").style.display = "block";
       document.getElementById("resultLine").innerHTML =
         `今日は参加してくれてありがとう！<br>次回は10月4日（日）14:00〜17:00 九州男で開催！<br>また来てね！<br>` +
         `よろしければアンケートにお答えください。<br>今日選んだ気分は: ${vibeNameFor[myVibe] || myVibe || "-"}`;
@@ -400,16 +480,20 @@
     document.getElementById("chooseAgainBtn").style.display = "";
     document.getElementById("resultLine").innerHTML =
       `あなたはチーム<b>${myGroup}</b>です　気分: ${vibeNameFor[myVibe] || myVibe || "-"}`;
-    updateCountsVisibility(lastQuestion);
+    updatePreDiscussionVisibility(lastQuestion);
     updateQuestion(lastQuestion);
   }
 
-  // Member counts only make sense once a discussion round has actually started —
-  // hide them for anyone who joins early, before the first theme is set.
-  function updateCountsVisibility(question) {
+  // Before the first discussion theme is set (either at the very start of the
+  // event, or right after staff hits クリア), the team assignment and member
+  // counts don't mean anything actionable yet — hide them and show a neutral
+  // waiting note instead, rather than a confusing "Team A, 1 member" message.
+  function updatePreDiscussionVisibility(question) {
     if (eventOver) return; // renderResultScreen already hides everything in that case
-    const block = document.getElementById("countsBlock");
-    block.style.display = (question && question.length > 0) ? "block" : "none";
+    const active = question && question.length > 0;
+    document.getElementById("countsBlock").style.display = active ? "block" : "none";
+    document.getElementById("resultLine").style.display = active ? "block" : "none";
+    document.getElementById("waitingNote").style.display = active ? "none" : "block";
   }
 
   function updateQuestion(question) {

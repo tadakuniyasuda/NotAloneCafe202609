@@ -275,7 +275,12 @@ wss.on("connection", (ws, req) => {
     ws.send(JSON.stringify({ type: "welcome", token, isAdmin: true }));
     ws.send(JSON.stringify(adminState()));
 
-    ws.on("message", (raw) => handleAdminMessage(raw));
+    ws.on("message", (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw); } catch { return; }
+      if (msg.type === "ping") { ws.send(JSON.stringify({ type: "pong" })); return; }
+      handleAdminMessage(raw);
+    });
     ws.on("close", () => {
       const c = clients.get(token);
       if (c) c.connected = false;
@@ -287,6 +292,11 @@ wss.on("connection", (ws, req) => {
     const token = makeToken();
     clients.set(token, { tag: "DISPLAY", group: null, vibe: null, ws, isAdmin: false, isDisplay: true, connected: true });
     ws.send(JSON.stringify(publicState()));
+    ws.on("message", (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw); } catch { return; }
+      if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
+    });
     ws.on("close", () => {
       const c = clients.get(token);
       if (c) c.connected = false;
@@ -304,6 +314,8 @@ wss.on("connection", (ws, req) => {
     } catch {
       return;
     }
+
+    if (msg.type === "ping") { ws.send(JSON.stringify({ type: "pong" })); return; }
 
     if (msg.type === "init") {
       if (msg.token && clients.has(msg.token) && !clients.get(msg.token).isAdmin && !clients.get(msg.token).isDisplay) {

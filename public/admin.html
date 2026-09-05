@@ -67,9 +67,41 @@
   select.move-select { padding: 4px 6px; }
 
   .status { margin-top: 16px; font-size: 0.75rem; color: #b5b5b5; }
+
+  #connOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(43,43,43,0.94);
+    color: white;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    z-index: 200;
+    padding: 20px;
+  }
+  #connOverlay .icon { font-size: 2.4rem; }
+  #connOverlay .msg { font-size: 1rem; line-height: 1.6; max-width: 320px; }
+  #connOverlay button {
+    margin-top: 6px;
+    padding: 10px 22px;
+    border-radius: 999px;
+    border: none;
+    background: white;
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
 </style>
 </head>
 <body>
+  <div id="connOverlay">
+    <div class="icon">📡</div>
+    <div class="msg">管理画面の接続が切れました。<br>自動で再接続しています…</div>
+    <button onclick="location.reload()">今すぐ再読み込み</button>
+  </div>
+
   <h1>Not Alone Cafe — 管理画面</h1>
   <div class="sub">グループとディスカッションのスケジュールを管理します</div>
 
@@ -161,17 +193,54 @@
   let adminInitiatedChange = false; // true right after the admin themself triggers a question/shuffle change
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}/?admin=1&key=${encodeURIComponent(key)}`);
+  let ws;
+  let heartbeatInterval = null;
+  let heartbeatTimeout = null;
+  let reconnectAttempts = 0;
 
-  ws.onopen = () => { statusEl.textContent = "接続済み"; };
-  ws.onclose = () => { statusEl.textContent = "接続が切れました"; };
-  ws.onerror = () => { statusEl.textContent = "接続エラー（管理キーを確認してください）"; };
+  function showConnLost() { document.getElementById("connOverlay").style.display = "flex"; }
+  function hideConnLost() { document.getElementById("connOverlay").style.display = "none"; }
 
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === "error") { statusEl.textContent = msg.message; return; }
-    if (msg.type === "adminState") render(msg);
-  };
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatInterval = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "ping" }));
+      heartbeatTimeout = setTimeout(() => { ws.close(); }, 5000);
+    }, 10000);
+  }
+  function stopHeartbeat() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+  }
+
+  function connect() {
+    ws = new WebSocket(`${proto}//${location.host}/?admin=1&key=${encodeURIComponent(key)}`);
+
+    ws.onopen = () => {
+      reconnectAttempts = 0;
+      hideConnLost();
+      statusEl.textContent = "接続済み";
+      startHeartbeat();
+    };
+    ws.onclose = () => {
+      stopHeartbeat();
+      statusEl.textContent = "接続が切れました";
+      showConnLost();
+      reconnectAttempts++;
+      const delay = Math.min(2000 * reconnectAttempts, 10000);
+      setTimeout(connect, delay);
+    };
+    ws.onerror = () => { ws.close(); };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "pong") { if (heartbeatTimeout) clearTimeout(heartbeatTimeout); return; }
+      if (msg.type === "error") { statusEl.textContent = msg.message; return; }
+      if (msg.type === "adminState") render(msg);
+    };
+  }
+  connect();
 
   let presetsLoaded = false;
   function loadPresets(list) {
