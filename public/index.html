@@ -28,7 +28,16 @@
   header { text-align: center; margin-bottom: 8px; }
   .rainbow-bar { height: 4px; width: 64px; border-radius: 2px; background: var(--rainbow); margin: 0 auto 14px; }
   h1 { font-size: 1.3rem; margin: 0 0 2px; letter-spacing: 0.02em; }
-  .sub { font-size: 0.85rem; color: #7a7a7a; margin-bottom: 28px; }
+  .sub { font-size: 0.85rem; color: #7a7a7a; margin-bottom: 14px; }
+  .card-chip {
+    display: none; align-items: center; justify-content: center; gap: 8px;
+    margin: 0 auto 20px; font-size: 0.8rem; color: #7a7a7a;
+  }
+  .card-chip .face {
+    background: white; border: 2px solid #2B2B2B; border-radius: 8px; padding: 2px 12px;
+    font-size: 1.35rem; font-weight: 700; color: #2B2B2B; letter-spacing: 0.02em; line-height: 1.4;
+  }
+  .card-chip .face.red { color: #d33; border-color: #d33; }
 
   #stage { width: 100%; max-width: 420px; }
 
@@ -210,6 +219,7 @@
     <div class="rainbow-bar"></div>
     <h1>Not Alone Cafe</h1>
     <div class="sub">今の気分をひとつタップして、グループに参加しよう</div>
+    <div class="card-chip" id="cardChip"></div>
   </header>
 
   <div id="stage">
@@ -310,6 +320,7 @@
   let pendingVibe = null;        // a tap that happened while offline; sent as soon as we are connected
   let lastQuestion = "";
   let lastCategory = "";
+  let myCard = "";
   // Shown until the first message arrives; the server's NEXT_EVENT (server.js) then replaces it.
   let nextEvent = { date: "12月6日（日）", time: "14:00〜17:00", place: "九州男" };
 
@@ -328,6 +339,16 @@
   function saveToken(t) {
     token = t;
     try { if (t) localStorage.setItem(STORAGE_KEY, t); else localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+  }
+
+  // The player's card (e.g. ♠3). Unique per player, kept until staff reset.
+  function renderCard() {
+    const el = document.getElementById("cardChip");
+    if (!el) return;
+    if (!myCard) { el.style.display = "none"; return; }
+    const red = myCard.startsWith("♥") || myCard.startsWith("♦");
+    el.style.display = "flex";
+    el.innerHTML = `<span>あなたのカード</span><span class="face${red ? " red" : ""}">${myCard}</span>`;
   }
 
   function renderNextEvent() {
@@ -364,6 +385,8 @@
       eventOver = false;
       choosingAgain = false;
       saveToken(null);
+      myCard = "";
+      renderCard();
       resultEl.style.display = "none";
       choicesEl.style.display = "grid";
       statusEl.textContent = "リセットされました。もう一度選んでください。";
@@ -396,7 +419,10 @@
   // It makes the screen agree with what the server says RIGHT NOW.
   function applyWelcome(msg) {
     saveToken(msg.token);
-    statusEl.textContent = `あなたのタグ: ${msg.tag}`;
+    if (msg.identityLost) NAC.log(`サーバーが前の情報を覚えていなかったため、新しいカード ${msg.tag} が発行されました`);
+    myCard = msg.tag || "";
+    renderCard();
+    statusEl.textContent = myCard ? `あなたのカード: ${myCard}` : "";
     if (typeof msg.eventOver === "boolean") eventOver = msg.eventOver;
     lastCategory = msg.category || "";
 
@@ -443,6 +469,7 @@
     onMessage: handleMessage,
   });
   NAC.getClientView = () => ({
+    card: myCard,
     group: myGroup,
     vibe: myVibe,
     question: lastQuestion,

@@ -33,6 +33,9 @@
   .card .current-label { font-size: 0.7rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
   .card .current-q { font-size: 1.05rem; margin: 6px 0 14px; min-height: 1.4em; }
   .card .current-q.empty { color: #bbb; font-style: italic; }
+  .card-face { font-weight: 700; font-size: 1rem; }
+  .card-face.red { color: #d33; }
+  tr.gone td { opacity: 0.45; }
   .card .current-cat { font-size: 0.78rem; color: #8a8a8a; margin: -8px 0 12px; min-height: 1em; }
   #toast { display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 250;
     background: #c0392b; color: white; padding: 10px 16px; border-radius: 10px; font-size: 0.85rem; box-shadow: 0 4px 14px rgba(0,0,0,.25); max-width: 90vw; }
@@ -182,8 +185,22 @@
 
   <div class="groups" id="groupCards"></div>
 
+  <h2 class="section">カードで分ける（予備・手動用）</h2>
+  <div class="card">
+    <div class="controls">
+      <button class="ghost" id="byCardSuitBtn">♠♥♦♣ スート別にチーム分け</button>
+      <button class="ghost" id="byCardNumBtn">1・2・3… 数字別にチーム分け</button>
+    </div>
+    <div class="info-sub" style="font-size:0.75rem; color:#999; margin:0 0 8px;">
+      機械の調子が悪いときは、この一覧を見ながら「スペードの人はこちら」「1の人はあちら」と声をかけてください。
+      （接続中、または離席10分以内の人だけ載ります）
+    </div>
+    <div id="cardGroups" style="font-size:0.85rem; line-height:1.9;"></div>
+  </div>
+
+
   <table>
-    <thead><tr><th>タグ</th><th>気分</th><th>チーム</th><th>移動</th></tr></thead>
+    <thead><tr><th>カード</th><th>気分</th><th>チーム</th><th>状態</th><th>移動</th></tr></thead>
     <tbody id="roster"></tbody>
   </table>
 
@@ -355,6 +372,77 @@
   });
 
   const ALL_TEAMS = ["A", "B", "C", "D"];
+  const SUIT_SYM = { spade: "♠", heart: "♥", diamond: "♦", club: "♣" };
+  const SUIT_ORDER = ["spade", "heart", "diamond", "club"];
+  let currentRoster = [];
+  let rosterReceivedAt = 0;
+
+  function cardHtml(p) {
+    const red = p.suit === "heart" || p.suit === "diamond";
+    return `<span class="card-face${red ? " red" : ""}">${p.tag}</span>`;
+  }
+  function fmtAge(sec) {
+    return sec < 90 ? `${Math.max(0, Math.round(sec))}秒` : `${Math.round(sec / 60)}分`;
+  }
+  function statusText(p) {
+    if (p.connected) return "🟢 接続中";
+    const age = p.silentSec + (Date.now() - rosterReceivedAt) / 1000;
+    return p.active ? `⚪ 切断中 ${fmtAge(age)}` : `💤 離脱 ${fmtAge(age)}`;
+  }
+
+  function renderRoster() {
+    rosterEl.innerHTML = "";
+    for (const person of currentRoster) {
+      const tr = document.createElement("tr");
+      if (!person.active) tr.className = "gone";
+      const options = ALL_TEAMS.map(
+        (t) => `<option value="${t}" ${t === person.group ? "selected" : ""}>${t}</option>`
+      ).join("");
+      tr.innerHTML = `
+        <td>${cardHtml(person)}</td>
+        <td>${VIBE_LABELS[person.vibe] || "-"}</td>
+        <td>${person.group || "-"}</td>
+        <td class="status-cell">${statusText(person)}</td>
+        <td><select class="move-select" data-token="${person.token}">${options}</select></td>
+      `;
+      tr.querySelector(".move-select").addEventListener("change", (e) => {
+        sendMsg({ type: "move", token: person.token, toGroup: e.target.value });
+      });
+      rosterEl.appendChild(tr);
+    }
+  }
+
+  // "切断中 3分" keeps counting between server updates.
+  setInterval(() => {
+    const cells = rosterEl.querySelectorAll(".status-cell");
+    currentRoster.forEach((p, i) => { if (cells[i]) cells[i].textContent = statusText(p); });
+  }, 5000);
+
+  // The by-hand backup view: who holds which suit / which number right now.
+  function renderCardGroups() {
+    const live = currentRoster.filter((p) => p.active);
+    const bySuit = SUIT_ORDER.map((k) => {
+      const m = live.filter((p) => p.suit === k).sort((a, b) => a.num - b.num);
+      const red = k === "heart" || k === "diamond";
+      return `<div><span class="card-face${red ? " red" : ""}">${SUIT_SYM[k]}</span> （${m.length}人）: ${m.map((p) => p.num).join(", ") || "-"}</div>`;
+    }).join("");
+    const nums = [...new Set(live.map((p) => p.num))].sort((a, b) => a - b);
+    const byNum = nums.map((n) => {
+      const m = live.filter((p) => p.num === n).sort((a, b) => SUIT_ORDER.indexOf(a.suit) - SUIT_ORDER.indexOf(b.suit));
+      return `<div><b>${n}</b> （${m.length}人）: ${m.map(cardHtml).join(" ")}</div>`;
+    }).join("");
+    document.getElementById("cardGroups").innerHTML =
+      `<div style="font-size:0.75rem;color:#999;">スート別</div>${bySuit}` +
+      `<div style="font-size:0.75rem;color:#999;margin-top:8px;">数字別</div>${byNum || "-"}`;
+  }
+
+  document.getElementById("byCardSuitBtn").addEventListener("click", () => {
+    if (confirm("全員をスート別（♠=A, ♥=B, ♦=C, ♣=D）にチーム分けします。よろしいですか？")) { adminInitiatedChange = true; sendMsg({ type: "groupByCard", mode: "suit" }); }
+  });
+  document.getElementById("byCardNumBtn").addEventListener("click", () => {
+    if (confirm("全員をカードの数字別にチーム分けします。よろしいですか？")) { adminInitiatedChange = true; sendMsg({ type: "groupByCard", mode: "number" }); }
+  });
+
   const VIBE_LABELS = { yellow: "イェロー", pink: "ピンク", green: "グリーン", blue: "ブルー" };
 
   function render(state) {
@@ -425,26 +513,11 @@
       groupCardsEl.appendChild(card);
     }
 
-    rosterEl.innerHTML = "";
-    for (const person of state.roster) {
-      const tr = document.createElement("tr");
-      const options = ALL_TEAMS.map(
-        (t) => `<option value="${t}" ${t === person.group ? "selected" : ""}>${t}</option>`
-      ).join("");
-      tr.innerHTML = `
-        <td>${person.tag}</td>
-        <td>${VIBE_LABELS[person.vibe] || "-"}</td>
-        <td>${person.group || "-"}</td>
-        <td><select class="move-select" data-token="${person.token}">${options}</select></td>
-      `;
-      rosterEl.appendChild(tr);
-    }
-
-    rosterEl.querySelectorAll(".move-select").forEach((sel) => {
-      sel.addEventListener("change", () => {
-        sendMsg({ type: "move", token: sel.dataset.token, toGroup: sel.value });
-      });
-    });
+    currentRoster = state.roster || [];
+    rosterReceivedAt = Date.now();
+    renderRoster();
+    renderCardGroups();
+    document.getElementById("byCardSuitBtn").disabled = false;
   }
 </script>
 </body>

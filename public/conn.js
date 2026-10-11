@@ -33,6 +33,7 @@
       clientConnId: "",
       serverConnId: "",
       token: "",
+      tag: "",
       instance: "",
       serverBuild: "",
       openedAt: 0,
@@ -97,6 +98,7 @@
   let connectingSince = 0;
   let lastWatch = Date.now();
   let lastSyncAt = 0;
+  let halted = false; // true when another tab took over this player: stop, don't fight for it
 
   function overlayEl() { return document.getElementById("connOverlay"); }
   function scheduleOverlay() {
@@ -215,6 +217,7 @@
       }
       if (msg.type === "welcome") {
         if (msg.token) stats.token = msg.token;
+        if (msg.tag) stats.tag = msg.tag;
         if (msg.connId) stats.serverConnId = msg.connId;
       }
       if ((msg.type === "welcome" || msg.type === "state" || msg.type === "adminState") && msg.v != null) {
@@ -231,6 +234,20 @@
       stats.closes.push({ t: ts(), code: ev.code, reason: ev.reason || "", clean: ev.wasClean });
       if (stats.closes.length > 6) stats.closes.shift();
       NAC.log(`切断 code=${ev.code} reason="${ev.reason || ""}" clean=${ev.wasClean}`);
+      if (ev.code === 4000) {
+        // Server closed us because the same player (same browser storage) opened this page in
+        // another tab. Reconnecting would just kick that tab out again, forever.
+        halted = true;
+        NAC.log("⚠ 同じ参加者が別のタブ/画面で開かれたため、この画面は停止しました");
+        const el = overlayEl();
+        if (el) {
+          const m = el.querySelector(".msg");
+          if (m) m.innerHTML = "この参加者は別のタブ／画面で開かれています。<br>こちらで続けるには「今すぐ再読み込み」を押してください。";
+          el.style.display = "flex";
+        }
+        emit("close");
+        return;
+      }
       scheduleOverlay();
       emit("close");
       scheduleReconnect(`closed ${ev.code}`);
@@ -254,6 +271,7 @@
 
   // Ask "are you there?" and, if the server stays silent for 4 s, replace the socket.
   function probe(why) {
+    if (halted) return;
     stats.probes++;
     if (ws && ws.readyState === WebSocket.CONNECTING) return; // already connecting; the watchdog covers a stuck attempt
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -288,6 +306,7 @@
   }
 
   function watchdog() {
+    if (halted) { lastWatch = Date.now(); return; }
     const now = Date.now();
     const gap = now - lastWatch;
     lastWatch = now;

@@ -47,8 +47,27 @@ const NEXT_EVENT = { date: "12月6日（日）", time: "14:00〜17:00", place: "
 const ALL_TEAMS = ["A", "B", "C", "D"];
 const TEAM_LABELS = { A: "チームA", B: "チームB", C: "チームC", D: "チームD" };
 
-// Generic, non-cutesy attendee tags: hiragana + 2-digit number, e.g. "さ08"
-const TAG_KANA = ["あ","い","う","え","お","か","き","く","け","こ","さ","し","す","せ","そ","た","ち","つ","て","と"];
+// ---- Player cards -------------------------------------------------------
+// Every player gets a unique playing-card ID such as ♠3 or ♥7 (suit + number).
+// It is unique among everyone registered on this server, and a phone keeps it
+// until staff press 全員リセット (or the server restarts and forgets everyone).
+// Handy twice over: staff can tell phones apart on the admin page, and if the app
+// ever fails you can still group people by hand ("all ♠ here, all 1s there").
+const SUITS = [
+  { key: "spade", sym: "♠", name: "スペード" },
+  { key: "heart", sym: "♥", name: "ハート" },
+  { key: "diamond", sym: "♦", name: "ダイヤ" },
+  { key: "club", sym: "♣", name: "クラブ" },
+];
+// Cards are handed out from a small "deck" first: 4 suits x numbers 1-4 = 16 cards.
+// Past 16 players the deck simply grows by 4 numbers at a time (5-8, 9-12 ...), so
+// two players can never share a card, however many join.
+const CARD_BLOCK = 4;
+
+// A phone that goes quiet (screen locked) is still counted and still shuffled for
+// this long, so it comes back to the team it was moved to. After that it shows as
+// "離脱" in admin and is left out of shuffles until it returns.
+const GRACE_MS = process.env.GRACE_MS !== undefined ? Number(process.env.GRACE_MS) : 10 * 60 * 1000;
 
 // Discussion topics, grouped by category. Server owns this list so scheduled
 // auto-shuffles can pick topics themselves; the admin page receives the same
@@ -202,10 +221,47 @@ function activeTeams() {
   return ALL_TEAMS.slice(0, numTeams);
 }
 
-function makeTag() {
-  const kana = TAG_KANA[Math.floor(Math.random() * TAG_KANA.length)];
-  const num = String(Math.floor(Math.random() * 90) + 10);
-  return `${kana}${num}`;
+// Pick the next free card. Spreads suits evenly first, then numbers, so the first
+// four players hold four different suits, and groups by suit or by number stay
+// roughly equal in size.
+function makeCard() {
+  let cardMax = CARD_BLOCK;
+  for (;;) {
+    const taken = new Set();
+    const suitUse = {};
+    const numUse = {};
+    SUITS.forEach((st) => (suitUse[st.key] = 0));
+    for (const c of clients.values()) {
+      if (!isAttendee(c) || !c.suit) continue;
+      taken.add(c.suit + c.num);
+      suitUse[c.suit]++;
+      numUse[c.num] = (numUse[c.num] || 0) + 1;
+    }
+    const free = [];
+    for (const st of SUITS) for (let n = 1; n <= cardMax; n++) if (!taken.has(st.key + n)) free.push({ st, n });
+    if (free.length === 0) { cardMax += CARD_BLOCK; continue; }
+    const minSuit = Math.min(...free.map((f) => suitUse[f.st.key]));
+    let pool = free.filter((f) => suitUse[f.st.key] === minSuit);
+    const minNum = Math.min(...pool.map((f) => numUse[f.n] || 0));
+    pool = pool.filter((f) => (numUse[f.n] || 0) === minNum);
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    return { suit: pick.st.key, num: pick.n, tag: pick.st.sym + pick.n };
+  }
+}
+
+function newAttendeeRecord(ws) {
+  const card = makeCard();
+  return {
+    tag: card.tag, suit: card.suit, num: card.num,
+    group: null, vibe: null, ws,
+    isAdmin: false, isDisplay: false, connected: true, lastSeen: Date.now(),
+  };
+}
+
+function cardOrder([, a], [, b]) {
+  const sa = SUITS.findIndex((st) => st.key === a.suit);
+  const sb = SUITS.findIndex((st) => st.key === b.suit);
+  return sa - sb || a.num - b.num;
 }
 
 function makeToken() {
@@ -216,8 +272,13 @@ function isAttendee(c) {
   return !c.isAdmin && !c.isDisplay;
 }
 
+function isActive(c) {
+  return c.connected || Date.now() - (c.lastSeen || 0) < GRACE_MS;
+}
+
+// Everyone who counts right now: connected, or quiet for less than GRACE_MS.
 function activeAttendees() {
-  return [...clients.entries()].filter(([, c]) => c.connected && isAttendee(c));
+  return [...clients.entries()].filter(([, c]) => isAttendee(c) && isActive(c));
 }
 
 function teamCounts() {
@@ -416,12 +477,20 @@ function publicState() {
 }
 
 function adminState() {
-  const roster = activeAttendees().map(([token, c]) => ({
-    token,
-    tag: c.tag,
-    group: c.group,
-    vibe: c.vibe,
-  }));
+  const roster = [...clients.entries()]
+    .filter(([, c]) => isAttendee(c))
+    .sort(cardOrder)
+    .map(([token, c]) => ({
+      token,
+      tag: c.tag,
+      suit: c.suit,
+      num: c.num,
+      group: c.group,
+      vibe: c.vibe,
+      connected: c.connected,
+      active: isActive(c),
+      silentSec: Math.round((Date.now() - (c.lastSeen || 0)) / 1000),
+    }));
   return {
     ...publicState(),
     type: "adminState",
@@ -449,6 +518,8 @@ function sendWelcome(ws, token, extra = {}) {
     type: "welcome",
     token,
     tag: c.tag,
+    suit: c.suit,
+    num: c.num,
     group: c.group,
     groupLabel: c.group ? TEAM_LABELS[c.group] : null,
     vibe: c.vibe,
@@ -486,6 +557,8 @@ function debugInfo(ws, token) {
     openSockets: open,
     registeredAttendees: regs.length,
     flaggedConnected: regs.filter((c) => c.connected).length,
+    activeAttendees: regs.filter(isActive).length,
+    graceMin: Math.round(GRACE_MS / 60000),
     ghosts: regs.filter((c) => c.connected && c.ws.readyState !== WebSocket.OPEN).length,
     you: me
       ? {
@@ -593,6 +666,7 @@ wss.on("connection", (ws, req) => {
       return;
     }
 
+    if (token && clients.has(token)) clients.get(token).lastSeen = Date.now();
     if (handleCommon(msg, token)) return;
 
     if (msg.type === "init") {
@@ -605,6 +679,7 @@ wss.on("connection", (ws, req) => {
         const old = existing.ws;
         existing.ws = ws;
         existing.connected = true;
+        existing.lastSeen = Date.now();
         if (old && old !== ws && old.readyState === WebSocket.OPEN) {
           try { old.close(4000, "replaced"); } catch { /* ignore */ }
         }
@@ -613,7 +688,7 @@ wss.on("connection", (ws, req) => {
         // visitor (msg.token null) or the server was restarted / reset since.
         identityLost = !!msg.token;
         token = makeToken();
-        clients.set(token, { tag: makeTag(), group: null, vibe: null, ws, isAdmin: false, isDisplay: false, connected: true });
+        clients.set(token, newAttendeeRecord(ws));
       }
       sendWelcome(ws, token, { identityLost });
       broadcastState();
@@ -650,7 +725,8 @@ wss.on("connection", (ws, req) => {
     // from an older, already-replaced socket must not hide a live phone.
     if (c && c.ws === ws) {
       c.connected = false;
-      broadcastState(); // so team counts on other screens drop right away
+      c.lastSeen = Date.now();
+      broadcastState(); // so admin sees the status change right away
     }
   });
 });
@@ -664,6 +740,27 @@ function handleAdminMessage(msg) {
       sendAssigned(c);
       broadcastState();
     }
+    return;
+  }
+
+  // Backup grouping that does not depend on the shuffle: one team per suit, or by
+  // number. Players still get the usual "you moved" notification.
+  if (msg.type === "groupByCard" && (msg.mode === "suit" || msg.mode === "number")) {
+    const active = activeTeams();
+    const teamsMap = {};
+    active.forEach((t) => (teamsMap[t] = []));
+    const joined = activeAttendees().filter(([, c]) => c.group);
+    for (const [token, c] of joined) {
+      const idx = msg.mode === "suit"
+        ? SUITS.findIndex((st) => st.key === c.suit) % active.length
+        : (c.num - 1) % active.length;
+      c.group = active[idx];
+      teamsMap[active[idx]].push(token);
+    }
+    recordPairings(teamsMap);
+    eventOver = false;
+    for (const [, c] of joined) sendAssigned(c);
+    broadcastState();
     return;
   }
 
@@ -787,7 +884,11 @@ setInterval(() => {
 // "tick" carrying the current state version. Clients use the tick as proof the
 // connection is alive and to notice they missed a state update.
 const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS) || 10000;
+let lastActiveCount = -1;
 setInterval(() => {
+  // Someone aging out of the grace period changes the counts without any event.
+  const activeNow = activeAttendees().length;
+  if (activeNow !== lastActiveCount) { lastActiveCount = activeNow; broadcastState(); }
   for (const ws of wss.clients) {
     if (ws.isAlive === false) { ws.terminate(); continue; }
     ws.isAlive = false;

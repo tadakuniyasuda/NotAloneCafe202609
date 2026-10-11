@@ -5,9 +5,8 @@
 // mismatch — which is exactly the "my screen is stuck on old info" symptom.
 // Everything is also written to a timestamped log in a text box you can copy.
 //
-// Player page: the button only appears after opening the page once with ?debug=1
-// (remembered on that phone; ?debug=0 turns it off again). Admin and display
-// pages always show it.
+// The 🛠 button shows by default on all pages (bottom-left). Open any page once with
+// ?debug=0 to hide it on that device, ?debug=1 to bring it back.
 
 (function () {
   const NAC = window.NAC;
@@ -207,7 +206,7 @@
       ["サーバー instance", `${stats.instance || "-"}${d ? `  (稼働 ${Math.floor(d.uptimeSec / 60)}分${d.uptimeSec % 60}秒)` : ""}`],
       ["接続状態", `${stats.state}`],
       ["接続ID", `クライアント ${stats.clientConnId || "-"} / サーバー ${stats.serverConnId || "-"}`],
-      ["トークン", stats.token ? stats.token.slice(0, 8) + "…" : "-"],
+      ["カード / トークン", `${stats.tag || "-"}  /  ${stats.token ? stats.token.slice(0, 8) + "…" : "-"}`],
       ["ページ読み込み", `${hms(stats.pageLoadedAt)} (${ago(stats.pageLoadedAt)})`],
       ["接続した時刻", `${hms(stats.openedAt)} (${ago(stats.openedAt)})`],
       ["最終受信", `${stats.lastMsgType || "-"}  ${ago(stats.lastMsgAt)}`],
@@ -221,7 +220,7 @@
     ];
     if (d) {
       kv.push(["サーバーの認識", d.you ? JSON.stringify(d.you) : "-"]);
-      kv.push(["サーバー全体", `接続中ソケット ${d.openSockets} / 登録参加者 ${d.registeredAttendees} / 接続扱い ${d.flaggedConnected} / ghost ${d.ghosts}`]);
+      kv.push(["サーバー全体", `接続中ソケット ${d.openSockets} / 登録参加者 ${d.registeredAttendees} / 接続扱い ${d.flaggedConnected} / 有効 ${d.activeAttendees} (離席${d.graceMin}分まで) / ghost ${d.ghosts}`]);
       kv.push(["最後の照会", ago(lastDebugAt)]);
     } else {
       kv.push(["サーバーの認識", "（「サーバーに照会」を押すと表示）"]);
@@ -250,7 +249,7 @@
       `url: ${location.href.replace(/key=[^&]*/, "key=***")}`,
       `ua: ${navigator.userAgent}`,
       `role: ${stats.role}  page build: ${NAC.build}  server build: ${stats.serverBuild}`,
-      `instance: ${stats.instance}  token: ${stats.token ? stats.token.slice(0, 8) : "-"}  connIds: ${stats.clientConnId}/${stats.serverConnId}`,
+      `instance: ${stats.instance}  card: ${stats.tag || "-"}  token: ${stats.token ? stats.token.slice(0, 8) : "-"}  connIds: ${stats.clientConnId}/${stats.serverConnId}`,
       `state: ${stats.state}  lastV: ${stats.lastV}  tickV: ${stats.tickV}  lastMsg: ${stats.lastMsgType} ${ago(stats.lastMsgAt)}`,
       `reconnects: ${stats.reconnects}  probes: ${stats.probes}  watchdog: ${stats.watchdogTrips}  wakeGaps: ${stats.wakeGaps}  syncs: ${stats.syncs}`,
       `client view: ${view ? JSON.stringify(view) : "-"}`,
@@ -275,17 +274,16 @@
   }
 
   // Called by each page right after NAC.start(...)
+  // The button is shown by default on every page while the app is being proven out.
+  // To hide it later on a given device open the page once with ?debug=0 (remembered);
+  // ?debug=1 brings it back.
   NAC.initDebug = function (role) {
-    if (role === "player") {
-      try {
-        const q = new URLSearchParams(location.search).get("debug");
-        if (q === "1") localStorage.setItem("nac_debug", "1");
-        if (q === "0") localStorage.removeItem("nac_debug");
-        enabled = localStorage.getItem("nac_debug") === "1";
-      } catch (e) { enabled = false; }
-    } else {
-      enabled = true;
-    }
+    try {
+      const q = new URLSearchParams(location.search).get("debug");
+      if (q === "0") localStorage.setItem("nac_debug_off", "1");
+      if (q === "1") localStorage.removeItem("nac_debug_off");
+      enabled = localStorage.getItem("nac_debug_off") !== "1";
+    } catch (e) { enabled = true; }
     if (!enabled) return;
     const go = () => build();
     if (document.body) go(); else document.addEventListener("DOMContentLoaded", go);
