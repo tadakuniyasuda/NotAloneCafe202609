@@ -33,6 +33,9 @@
   .card .current-label { font-size: 0.7rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
   .card .current-q { font-size: 1.05rem; margin: 6px 0 14px; min-height: 1.4em; }
   .card .current-q.empty { color: #bbb; font-style: italic; }
+  .card .current-cat { font-size: 0.78rem; color: #8a8a8a; margin: -8px 0 12px; min-height: 1em; }
+  #toast { display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 250;
+    background: #c0392b; color: white; padding: 10px 16px; border-radius: 10px; font-size: 0.85rem; box-shadow: 0 4px 14px rgba(0,0,0,.25); max-width: 90vw; }
 
   .controls { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
   .controls label { font-size: 0.85rem; }
@@ -96,6 +99,7 @@
 </style>
 </head>
 <body>
+  <div id="toast">未接続のため操作できませんでした。つながってからもう一度押してください。</div>
   <div id="connOverlay">
     <div class="icon">📡</div>
     <div class="msg">管理画面の接続が切れました。<br>自動で再接続しています…</div>
@@ -109,9 +113,20 @@
   <div class="card">
     <div class="current-label">現在表示中のテーマ</div>
     <div class="current-q empty" id="currentQDisplay">（まだ設定されていません）</div>
+    <div class="current-cat" id="currentCatDisplay"></div>
+    <div class="controls">
+      <label for="categorySelect">カテゴリ:</label>
+      <select id="categorySelect"></select>
+    </div>
     <div class="controls">
       <select id="questionPreset"></select>
       <button class="primary ghost" id="setPresetBtn">このテーマにする</button>
+    </div>
+    <div class="controls">
+      <button class="primary" id="randomTopicBtn">🎲 このカテゴリからランダムに選ぶ</button>
+    </div>
+    <div class="info-sub" style="font-size:0.75rem; color:#999; margin:-2px 0 12px;">
+      ✓ は今回すでに使ったテーマです。ランダムは未使用のテーマを優先します。
     </div>
     <div class="controls">
       <input type="text" id="customQuestion" placeholder="オリジナルのテーマを入力…" />
@@ -145,6 +160,10 @@
       <button class="danger" id="clearScheduleBtn">全て削除</button>
     </div>
     <div class="controls">
+      <label for="autoCategorySelect">自動／今すぐシャッフルで使うカテゴリ:</label>
+      <select id="autoCategorySelect"><option value="all">すべてのカテゴリからランダム</option></select>
+    </div>
+    <div class="controls">
       <button class="primary" id="shuffleNowBtn">🔀 今すぐ全員シャッフル</button>
     </div>
   </div>
@@ -171,6 +190,8 @@
   <div class="status" id="status">接続中…</div>
   <audio id="notifSound" src="/sound/notification.mp3" preload="auto"></audio>
 
+<script src="/conn.js"></script>
+<script src="/debug.js"></script>
 <script>
   const params = new URLSearchParams(location.search);
   const key = params.get("key") || "";
@@ -179,11 +200,12 @@
   const rosterEl = document.getElementById("roster");
   const numGroupsSelect = document.getElementById("numGroupsSelect");
   const notifSound = document.getElementById("notifSound");
+  const categorySelect = document.getElementById("categorySelect");
+  const presetSelect = document.getElementById("questionPreset");
+  const autoCategorySelect = document.getElementById("autoCategorySelect");
 
   // Unlock audio on the first click anywhere in the admin UI (browsers require
-  // one real interaction before JS can play sound). Admins naturally click
-  // something (a dropdown, a button) soon after opening this page, so this is
-  // unobtrusive rather than a blocking overlay like the display page has.
+  // one real interaction before JS can play sound).
   document.addEventListener("click", function unlockAudio() {
     notifSound.play().then(() => { notifSound.pause(); notifSound.currentTime = 0; }).catch(() => {});
     document.removeEventListener("click", unlockAudio);
@@ -191,73 +213,109 @@
 
   let previousQuestion = null;
   let adminInitiatedChange = false; // true right after the admin themself triggers a question/shuffle change
+  let currentSchedule = [];
+  let categories = [];      // from the server: [{id, name, topics}]
+  let usedTopics = [];
+  let topicsKey = "";       // detects when the dropdowns need rebuilding
+  let shownQuestion = "";
 
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  let ws;
-  let heartbeatInterval = null;
-  let heartbeatTimeout = null;
-  let reconnectAttempts = 0;
-
-  function showConnLost() { document.getElementById("connOverlay").style.display = "flex"; }
-  function hideConnLost() { document.getElementById("connOverlay").style.display = "none"; }
-
-  function startHeartbeat() {
-    stopHeartbeat();
-    heartbeatInterval = setInterval(() => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: "ping" }));
-      heartbeatTimeout = setTimeout(() => { ws.close(); }, 5000);
-    }, 10000);
-  }
-  function stopHeartbeat() {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
-    if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
-  }
-
-  function connect() {
-    ws = new WebSocket(`${proto}//${location.host}/?admin=1&key=${encodeURIComponent(key)}`);
-
-    ws.onopen = () => {
-      reconnectAttempts = 0;
-      hideConnLost();
-      statusEl.textContent = "接続済み";
-      startHeartbeat();
-    };
-    ws.onclose = () => {
-      stopHeartbeat();
-      statusEl.textContent = "接続が切れました";
-      showConnLost();
-      reconnectAttempts++;
-      const delay = Math.min(2000 * reconnectAttempts, 10000);
-      setTimeout(connect, delay);
-    };
-    ws.onerror = () => { ws.close(); };
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "pong") { if (heartbeatTimeout) clearTimeout(heartbeatTimeout); return; }
+  // ---- connection (shared layer) ----
+  NAC.start({
+    role: "admin",
+    path: `/?admin=1&key=${encodeURIComponent(key)}`,
+    onOpen: () => { statusEl.textContent = "接続済み"; },
+    onMessage: (msg) => {
       if (msg.type === "error") { statusEl.textContent = msg.message; return; }
       if (msg.type === "adminState") render(msg);
-    };
-  }
-  connect();
+    },
+  });
+  NAC.on("close", () => { statusEl.textContent = "接続が切れました（自動で再接続します）"; });
+  NAC.getClientView = () => ({ question: shownQuestion });
+  NAC.initDebug("admin");
 
-  let presetsLoaded = false;
-  function loadPresets(list) {
-    if (presetsLoaded) return;
-    const presetSelect = document.getElementById("questionPreset");
-    list.forEach((q) => {
-      const opt = document.createElement("option");
-      opt.value = q;
-      opt.textContent = q;
-      presetSelect.appendChild(opt);
+  // A button press while disconnected used to vanish silently. Now it says so.
+  const toastEl = document.getElementById("toast");
+  let toastTimer = null;
+  NAC.on("sendfail", () => {
+    toastEl.style.display = "block";
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.style.display = "none"; }, 3500);
+  });
+  function sendMsg(obj) { return NAC.send(obj); }
+
+  // ---- topic dropdowns ----
+  function buildCategoryOptions() {
+    const keep = categorySelect.value || "all";
+    categorySelect.innerHTML = "";
+    const all = document.createElement("option");
+    all.value = "all";
+    all.textContent = "すべてのカテゴリ";
+    categorySelect.appendChild(all);
+    categories.forEach((c) => {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = `${c.name}（${c.topics.length}）`;
+      categorySelect.appendChild(o);
     });
-    presetsLoaded = true;
+    categorySelect.value = [...categorySelect.options].some((o) => o.value === keep) ? keep : "all";
+
+    // Same list (without counts) for the auto-shuffle category.
+    autoCategorySelect.innerHTML = "";
+    const all2 = document.createElement("option");
+    all2.value = "all";
+    all2.textContent = "すべてのカテゴリからランダム";
+    autoCategorySelect.appendChild(all2);
+    categories.forEach((c) => {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      autoCategorySelect.appendChild(o);
+    });
   }
+
+  function buildTopicOptions() {
+    const keep = presetSelect.value;
+    presetSelect.innerHTML = "";
+    const sel = categorySelect.value;
+    const list = sel === "all" ? categories : categories.filter((c) => c.id === sel);
+    list.forEach((c) => {
+      const parent = sel === "all" ? document.createElement("optgroup") : presetSelect;
+      if (sel === "all") parent.label = c.name;
+      c.topics.forEach((t) => {
+        const o = document.createElement("option");
+        o.value = t;
+        o.textContent = (usedTopics.includes(t) ? "✓ " : "") + t;
+        parent.appendChild(o);
+      });
+      if (sel === "all") presetSelect.appendChild(parent);
+    });
+    if ([...presetSelect.options].some((o) => o.value === keep)) presetSelect.value = keep;
+  }
+
+  function syncTopicControls(state) {
+    const key2 = JSON.stringify([state.topicCategories.map((c) => c.id + c.topics.length), state.usedTopics]);
+    categories = state.topicCategories;
+    usedTopics = state.usedTopics || [];
+    if (key2 !== topicsKey) {
+      const firstTime = topicsKey === "";
+      topicsKey = key2;
+      if (firstTime) buildCategoryOptions();
+      buildTopicOptions();
+    }
+    // Don't yank a dropdown out from under the admin while it is open.
+    if (document.activeElement !== autoCategorySelect) autoCategorySelect.value = state.autoCategory || "all";
+  }
+
+  categorySelect.addEventListener("change", buildTopicOptions);
+  autoCategorySelect.addEventListener("change", () => sendMsg({ type: "setAutoCategory", value: autoCategorySelect.value }));
 
   document.getElementById("setPresetBtn").addEventListener("click", () => {
-    const v = document.getElementById("questionPreset").value;
+    const v = presetSelect.value;
     if (v) { adminInitiatedChange = true; sendMsg({ type: "setQuestion", text: v }); }
+  });
+  document.getElementById("randomTopicBtn").addEventListener("click", () => {
+    adminInitiatedChange = true;
+    sendMsg({ type: "randomTopic", category: categorySelect.value || "all" });
   });
   document.getElementById("setCustomBtn").addEventListener("click", () => {
     const input = document.getElementById("customQuestion");
@@ -275,8 +333,6 @@
   });
   document.getElementById("shuffleNowBtn").addEventListener("click", () => { adminInitiatedChange = true; sendMsg({ type: "shuffleNow" }); });
   document.getElementById("autoToggle").addEventListener("change", (e) => sendMsg({ type: "toggleAuto", enabled: e.target.checked }));
-
-  let currentSchedule = [];
 
   document.getElementById("addTimeBtn").addEventListener("click", () => {
     const val = document.getElementById("newTimeInput").value; // "HH:MM"
@@ -298,15 +354,12 @@
     if (confirm("全員の参加状態とテーマ・履歴をリセットしますか？")) sendMsg({ type: "reset" });
   });
 
-  function sendMsg(obj) { ws.send(JSON.stringify(obj)); }
-
   const ALL_TEAMS = ["A", "B", "C", "D"];
   const VIBE_LABELS = { yellow: "イェロー", pink: "ピンク", green: "グリーン", blue: "ブルー" };
 
   function render(state) {
     // Alert only when the question changed WITHOUT the admin themselves
-    // causing it — meaning the schedule fired automatically. If the admin
-    // clicked shuffle/setQuestion, they already see it happen, no need to alert.
+    // causing it — meaning the schedule fired automatically.
     if (previousQuestion !== null && state.question !== previousQuestion && state.question) {
       if (!adminInitiatedChange) {
         notifSound.currentTime = 0;
@@ -315,8 +368,9 @@
     }
     adminInitiatedChange = false;
     previousQuestion = state.question;
+    shownQuestion = state.question || "";
 
-    loadPresets(state.questionPresets || []);
+    syncTopicControls(state);
     numGroupsSelect.value = state.numTeams;
     currentSchedule = state.schedule || [];
 
@@ -328,6 +382,7 @@
       qDisplay.textContent = "（まだ設定されていません）";
       qDisplay.classList.add("empty");
     }
+    document.getElementById("currentCatDisplay").textContent = state.category ? `カテゴリ: ${state.category}` : (state.question ? "カテゴリ: オリジナル" : "");
 
     document.getElementById("autoToggle").checked = !!state.autoEnabled;
 
@@ -362,7 +417,7 @@
     });
 
     groupCardsEl.innerHTML = "";
-    for (const [key, t] of Object.entries(state.teams)) {
+    for (const [k, t] of Object.entries(state.teams)) {
       if (!t.active) continue;
       const card = document.createElement("div");
       card.className = "group-card";

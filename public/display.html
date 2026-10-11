@@ -247,7 +247,7 @@
 
     <div class="status-panel">
       <div class="question-card">
-        <div class="label">今のディスカッションテーマ</div>
+        <div class="label" id="questionLabel">今のディスカッションテーマ</div>
         <div class="q-text empty" id="questionText">まだ始まっていません</div>
       </div>
 
@@ -263,7 +263,7 @@
           <img src="/img/tshirt4.png" alt="オリジナルTシャツ4" />
         </div>
         <div class="tshirt-dots" id="displayTshirtDots"></div>
-        <div class="next-event">次回は10月4日（日）14:00〜17:00 九州男で開催！</div>
+        <div class="next-event" id="nextEventLine">次回は12月6日（日）14:00〜17:00 九州男で開催！</div>
       </div>
 
       <div class="next-shuffle" id="nextShuffle"></div>
@@ -273,20 +273,15 @@
   <div class="status" id="status">接続中…</div>
   <audio id="notifSound" src="/sound/notification.mp3" preload="auto"></audio>
 
+<script src="/conn.js"></script>
+<script src="/debug.js"></script>
 <script>
   const statusEl = document.getElementById("status");
   const notifSound = document.getElementById("notifSound");
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
 
-  let ws;
-  let heartbeatInterval = null;
-  let heartbeatTimeout = null;
-  let reconnectAttempts = 0;
   let previousQuestion = null;
   let soundUnlocked = false;
-
-  function showConnLost() { document.getElementById("connOverlay").style.display = "flex"; }
-  function hideConnLost() { document.getElementById("connOverlay").style.display = "none"; }
+  let shownQuestion = "";
 
   const overlay = document.getElementById("soundOverlay");
   overlay.addEventListener("click", () => {
@@ -300,45 +295,32 @@
     });
   });
 
-  function startHeartbeat() {
-    stopHeartbeat();
-    heartbeatInterval = setInterval(() => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: "ping" }));
-      heartbeatTimeout = setTimeout(() => { ws.close(); }, 5000);
-    }, 10000);
-  }
-  function stopHeartbeat() {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
-    if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
-  }
+  // ---- connection (shared layer) ----
+  NAC.start({
+    role: "display",
+    path: "/?display=1",
+    onOpen: () => { statusEl.textContent = "接続済み"; },
+    onMessage: (msg) => { if (msg.type === "state") render(msg); },
+  });
+  NAC.on("close", () => { statusEl.textContent = "接続が切れました。再接続しています…"; });
+  NAC.getClientView = () => ({ question: shownQuestion });
+  NAC.initDebug("display");
 
-  function connect() {
-    ws = new WebSocket(`${proto}//${location.host}/?display=1`);
-
-    ws.onopen = () => {
-      reconnectAttempts = 0;
-      hideConnLost();
-      statusEl.textContent = "接続済み";
-      startHeartbeat();
-    };
-    ws.onclose = () => {
-      stopHeartbeat();
-      statusEl.textContent = "接続が切れました。再接続しています…";
-      showConnLost();
-      reconnectAttempts++;
-      const delay = Math.min(2000 * reconnectAttempts, 10000);
-      setTimeout(connect, delay);
-    };
-    ws.onerror = () => { ws.close(); };
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "pong") { if (heartbeatTimeout) clearTimeout(heartbeatTimeout); return; }
-      if (msg.type === "state") render(msg);
-    };
+  // Keep the screen awake while this page is shown (where the browser supports it),
+  // so the display doesn't go dark and freeze mid-event.
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ("wakeLock" in navigator && document.visibilityState === "visible") {
+        wakeLock = await navigator.wakeLock.request("screen");
+        NAC.log("画面スリープ防止: ON");
+        wakeLock.addEventListener("release", () => NAC.log("画面スリープ防止: 解除された"));
+      }
+    } catch (e) { NAC.log("画面スリープ防止を取得できませんでした: " + e.message); }
   }
-  connect();
+  requestWakeLock();
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") requestWakeLock(); });
+  document.addEventListener("click", () => { if (!wakeLock || wakeLock.released) requestWakeLock(); });
 
   function render(state) {
     if (previousQuestion !== null && state.question !== previousQuestion && state.question) {
@@ -348,10 +330,19 @@
       }
     }
     previousQuestion = state.question;
+    shownQuestion = state.question || "";
+
+    if (state.nextEvent) {
+      const n = state.nextEvent;
+      document.getElementById("nextEventLine").textContent = `次回は${n.date}${n.time} ${n.place}で開催！`;
+    }
 
     const hasQuestion = state.question && state.question.length > 0;
     const eventOver = !!state.eventOver;
     const showPromo = eventOver || !hasQuestion;
+
+    document.getElementById("questionLabel").textContent =
+      "今のディスカッションテーマ" + (hasQuestion && !eventOver && state.category ? `　／　${state.category}` : "");
 
     const qEl = document.getElementById("questionText");
     if (eventOver) {
@@ -366,8 +357,7 @@
     }
 
     // Before the first discussion starts, AND during the "event over" wrap-up
-    // message, show the t-shirt/next-event panel instead of team headcounts —
-    // team assignments aren't the point in either of those moments.
+    // message, show the t-shirt/next-event panel instead of team headcounts.
     document.getElementById("teamsGrid").style.display = showPromo ? "none" : "grid";
     document.getElementById("preDiscussionPanel").style.display = showPromo ? "flex" : "none";
 
