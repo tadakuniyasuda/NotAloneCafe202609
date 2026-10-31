@@ -139,7 +139,7 @@ let currentQuestion = "";
 let currentCategory = ""; // category NAME of the current topic ("" for custom / none)
 let autoCategory = "all"; // which category auto-shuffles / "shuffle now" draw from
 let autoEnabled = true;
-let eventWindow = { start: "14:00", end: "17:00" };
+let eventWindow = { start: "14:00", end: "16:00" };
 let eventOver = false; // admin-set "Event over" state — replaces the player's welcome message
 const usedTopics = new Set(); // topics already shown this event (random picks avoid repeats)
 
