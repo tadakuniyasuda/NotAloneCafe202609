@@ -87,6 +87,40 @@
   #questionBox .label { font-size: 0.7rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.05em; }
   #questionBox .q-text { font-size: 1rem; margin-top: 4px; line-height: 1.5; }
 
+  /* --- Topic vote --- */
+  #voteBox { display: none; margin-top: 18px; text-align: left; }
+  #voteBox .vote-head { font-weight: 700; font-size: 1rem; text-align: center; }
+  #voteBox .vote-sub { font-size: 0.78rem; color: #888; text-align: center; margin-top: 2px; }
+  #voteTimer {
+    margin: 10px auto 6px; text-align: center; font-size: 1.6rem; font-weight: 700;
+    color: var(--sky-deep); font-variant-numeric: tabular-nums;
+  }
+  #voteTimer.hot { color: var(--coral); }
+  #voteTimer.idle { font-size: 0.85rem; font-weight: 500; color: #999; }
+  .vote-cat { margin: 14px 0 6px; font-size: 0.72rem; color: #b08a5a; font-weight: 600; letter-spacing: 0.04em; }
+  .vote-opt {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    width: 100%; text-align: left; margin-bottom: 6px;
+    border: 2px solid #eee; background: white; border-radius: 12px;
+    padding: 10px 12px; font-size: 0.9rem; line-height: 1.4; color: var(--ink);
+  }
+  .vote-opt:active { transform: scale(0.99); }
+  .vote-opt.mine { border-color: var(--sky-deep); background: #eef6fb; }
+  .vote-opt .n {
+    flex: none; min-width: 1.9em; text-align: center; border-radius: 999px;
+    background: #f1f1f1; color: #999; font-size: 0.8rem; padding: 2px 8px;
+  }
+  .vote-opt .n.has { background: var(--sky-deep); color: white; font-weight: 700; }
+  #voteBox.locked .vote-opt { pointer-events: none; }
+  #otherBox { display: none; margin-top: 14px; text-align: left; font-size: 0.85rem; }
+  #otherBox .other-title { font-size: 0.72rem; color: #b08a5a; font-weight: 600; margin-bottom: 6px; }
+  #otherBox .other-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; line-height: 1.4; }
+  #otherBox .other-row b { color: var(--sky-deep); flex: none; }
+  #otherBox details { margin-top: 10px; color: #777; }
+  #otherBox summary { cursor: pointer; font-size: 0.8rem; }
+  #otherBox details div { padding: 4px 0; font-size: 0.82rem; }
+  #decidedNote { font-size: 0.75rem; color: #999; margin-top: 6px; }
+
   .members-count { margin-top: 18px; font-size: 0.85rem; color: #666; }
   .members-count b { color: var(--ink); font-size: 1.1rem; }
 
@@ -241,6 +275,19 @@
         <div class="q-text" id="questionText"></div>
       </div>
 
+      <div id="voteBox">
+        <div class="vote-head">チームで話したいテーマに投票！</div>
+        <div class="vote-sub" id="voteSub"></div>
+        <div id="voteTimer" class="idle"></div>
+        <div id="voteList"></div>
+      </div>
+
+      <div id="otherBox">
+        <div class="other-title" id="otherTitle">ほかに票が入ったテーマ（自由に話してOK）</div>
+        <div id="otherVoted"></div>
+        <details id="otherDetails"><summary>票が入らなかったテーマを見る</summary><div id="otherRest"></div></details>
+      </div>
+
       <div id="countsBlock">
         <div class="members-count">現在のメンバー: <b id="resultCount">-</b> 人</div>
         <div class="members-count">参加者数: <b id="totalCount">-</b> 人</div>
@@ -318,8 +365,12 @@
   let awaitingOwnChoice = false; // true only right after the user taps a vibe themselves
   let choosingAgain = false;     // true while the user is re-picking a mood on purpose
   let pendingVibe = null;        // a tap that happened while offline; sent as soon as we are connected
-  let lastQuestion = "";
+  let lastQuestion = "";      // what is shown on screen as the team's topic
+  let globalQuestion = "";    // the server's single topic (used when no vote is running for my team)
   let lastCategory = "";
+  let lastState = null;       // latest "state" message
+  let myVote = null;
+  let clockSkew = 0;          // serverNow - Date.now() at the last state message
   let myCard = "";
   // Shown until the first message arrives; the server's NEXT_EVENT (server.js) then replaces it.
   let nextEvent = { date: "12月6日（日）", time: "14:00〜17:00", place: "九州男" };
@@ -327,7 +378,9 @@
   const vibeNameFor = { yellow: "イェロー", pink: "ピンク", green: "グリーン", blue: "ブルー" };
   const vibeImgFor = { yellow: "/img/yellow.png", pink: "/img/pink.png", green: "/img/green.png", blue: "/img/blue.png" };
 
+  let lastSoundAt = 0;
   function playNotifSound() {
+    lastSoundAt = Date.now();
     notifSound.currentTime = 0;
     notifSound.play().catch(() => {
       // Autoplay may be blocked until the user has interacted with the page at least
@@ -364,6 +417,7 @@
       myGroup = msg.group;
       myVibe = msg.vibe;
       lastCategory = msg.category || "";
+      globalQuestion = msg.question || "";
       if (awaitingOwnChoice) {
         // This "assigned" was triggered by the user's own tap — they can already
         // see the result on screen, no need to alert them with a sound.
@@ -382,6 +436,8 @@
       // Snap back to the choice screen and get a fresh identity immediately.
       myGroup = null;
       myVibe = null;
+      myVote = null;
+      lastState = null;
       eventOver = false;
       choosingAgain = false;
       saveToken(null);
@@ -395,6 +451,11 @@
     }
 
     if (msg.type === "state") {
+      const hadVote = teamView() && teamView().phase === "voting";
+      lastState = msg;
+      if (typeof msg.serverNow === "number") clockSkew = msg.serverNow - Date.now();
+      if (msg.myVote !== undefined) myVote = msg.myVote;
+      globalQuestion = msg.question || "";
       if (msg.nextEvent) { nextEvent = msg.nextEvent; renderNextEvent(); }
       lastCategory = msg.category || "";
       if (typeof msg.eventOver === "boolean" && msg.eventOver !== eventOver) {
@@ -410,8 +471,11 @@
           .reduce((sum, t) => sum + t.count, 0);
         document.getElementById("totalCount").textContent = total;
       }
-      updatePreDiscussionVisibility(msg.question);
-      updateQuestion(msg.question);
+      renderTeamTopic();
+      // A vote opened that wasn't started by a message to this phone (admin pressed the
+      // button): make a sound so people notice. Skipped if a sound just played.
+      const nowVoting = teamView() && teamView().phase === "voting";
+      if (!hadVote && nowVoting && myGroup && !choosingAgain && Date.now() - lastSoundAt > 3000) playNotifSound();
     }
   }
 
@@ -425,6 +489,7 @@
     statusEl.textContent = myCard ? `あなたのカード: ${myCard}` : "";
     if (typeof msg.eventOver === "boolean") eventOver = msg.eventOver;
     lastCategory = msg.category || "";
+    globalQuestion = msg.question || "";
 
     if (pendingVibe) {
       // The user tapped a mood while we were offline — send it now.
@@ -473,6 +538,8 @@
     group: myGroup,
     vibe: myVibe,
     question: lastQuestion,
+    vote: myVote,
+    votePhase: (teamView() || {}).phase || null,
     screen: resultEl.style.display === "block" ? "result" : "choices",
     eventOver,
   });
@@ -529,8 +596,7 @@
     document.getElementById("chooseAgainBtn").style.display = "";
     document.getElementById("resultLine").innerHTML =
       `あなたはチーム<b>${myGroup}</b>です　気分: ${vibeNameFor[myVibe] || myVibe || "-"}`;
-    updatePreDiscussionVisibility(lastQuestion);
-    updateQuestion(lastQuestion);
+    renderTeamTopic();
   }
 
   // Before the first discussion topic is set (either at the very start of the
@@ -539,7 +605,8 @@
   // waiting note instead.
   function updatePreDiscussionVisibility(question) {
     if (eventOver) return; // renderResultScreen already hides everything in that case
-    const active = question && question.length > 0;
+    const tv0 = teamView();
+    const active = (question && question.length > 0) || (tv0 && tv0.phase === "voting");
     document.getElementById("countsBlock").style.display = active ? "block" : "none";
     document.getElementById("resultLine").style.display = active ? "block" : "none";
     const waitingNote = document.getElementById("waitingNote");
@@ -554,8 +621,11 @@
     if (eventOver) return;
     lastQuestion = question || "";
     const box = document.getElementById("questionBox");
+    const tv = teamView();
+    const cat = tv && tv.phase === "decided" ? tv.category : lastCategory;
     document.getElementById("questionLabel").textContent =
-      "今のディスカッションテーマ" + (lastCategory ? `　／　${lastCategory}` : "");
+      (tv && tv.phase === "decided" ? "チームのテーマ（投票で決定）" : "今のディスカッションテーマ") +
+      (cat ? `　／　${cat}` : "");
     if (question && question.length > 0) {
       box.style.display = "block";
       document.getElementById("questionText").textContent = question;
@@ -563,6 +633,120 @@
       box.style.display = "none";
     }
   }
+
+  // ---- Topic vote (team view) ----
+  function teamView() {
+    return lastState && lastState.teamVotes && myGroup ? lastState.teamVotes[myGroup] || null : null;
+  }
+
+  // Everything below the team line: either the vote screen, or the decided topic
+  // plus the other options, or (no vote for my team) the single server topic.
+  function renderTeamTopic() {
+    if (eventOver) return;
+    const tv = teamView();
+    const q = tv && tv.phase === "decided" ? (tv.topic || globalQuestion)
+            : tv && tv.phase === "voting" ? ""
+            : globalQuestion;
+    updatePreDiscussionVisibility(q);
+    updateQuestion(q);
+    renderVoteBox(tv);
+    renderOtherBox(tv);
+  }
+
+  let voteListKey = "";
+  function buildVoteList(cats) {
+    const key = JSON.stringify(cats.map((c) => [c.id, c.topics.length]));
+    if (key === voteListKey) return;
+    voteListKey = key;
+    const list = document.getElementById("voteList");
+    list.innerHTML = "";
+    for (const cat of cats) {
+      const h = document.createElement("div");
+      h.className = "vote-cat";
+      h.textContent = cat.name;
+      list.appendChild(h);
+      for (const t of cat.topics) {
+        const b = document.createElement("button");
+        b.className = "vote-opt";
+        b.dataset.topic = t;
+        const span = document.createElement("span");
+        span.textContent = t;
+        const n = document.createElement("span");
+        n.className = "n";
+        n.textContent = "0";
+        b.appendChild(span);
+        b.appendChild(n);
+        list.appendChild(b);
+      }
+    }
+  }
+
+  function renderVoteBox(tv) {
+    const box = document.getElementById("voteBox");
+    if (!tv || tv.phase !== "voting" || !lastState || !lastState.topicCategories) { box.style.display = "none"; return; }
+    buildVoteList(lastState.topicCategories);
+    box.style.display = "block";
+    document.getElementById("voteSub").textContent =
+      `1人1票（決定するまで変更OK）・投票済み ${tv.voted}/${tv.members}人`;
+    document.querySelectorAll("#voteList .vote-opt").forEach((b) => {
+      const n = (tv.tally && tv.tally[b.dataset.topic]) || 0;
+      const badge = b.querySelector(".n");
+      badge.textContent = n;
+      badge.classList.toggle("has", n > 0);
+      b.classList.toggle("mine", b.dataset.topic === myVote);
+    });
+    updateVoteTimer();
+  }
+
+  function updateVoteTimer() {
+    const el = document.getElementById("voteTimer");
+    const tv = teamView();
+    if (!tv || tv.phase !== "voting") return;
+    if (!tv.deadline) {
+      el.className = "idle";
+      el.textContent = "最初の1票でカウントダウン開始（60秒）。全員が投票すると、すぐ決定します";
+      return;
+    }
+    const left = Math.ceil((tv.deadline - (Date.now() + clockSkew)) / 1000);
+    if (left <= 0) { el.className = "idle"; el.textContent = "集計中…"; return; }
+    el.className = left <= 10 ? "hot" : "";
+    el.textContent = `残り ${left} 秒`;
+  }
+  setInterval(updateVoteTimer, 250);
+
+  function renderOtherBox(tv) {
+    const box = document.getElementById("otherBox");
+    if (!tv || tv.phase !== "decided" || !lastState || !lastState.topicCategories) { box.style.display = "none"; return; }
+    box.style.display = "block";
+    const tally = tv.tally || {};
+    const voted = Object.entries(tally).filter(([t]) => t !== tv.topic).sort((a, b) => b[1] - a[1]);
+    const rest = [];
+    for (const cat of lastState.topicCategories) for (const t of cat.topics) if (t !== tv.topic && !tally[t]) rest.push(t);
+    const esc = (x) => String(x).replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]));
+    const own = tally[tv.topic] || 0;
+    document.getElementById("otherTitle").textContent = voted.length
+      ? "ほかに票が入ったテーマ（自由に話してOK）" : (tv.noVotes ? "誰も投票しなかったので、ランダムに選びました" : "ほかに票は入りませんでした");
+    document.getElementById("otherVoted").innerHTML =
+      (own ? `<div class="other-row"><span>▶ 決定: ${esc(tv.topic)}</span><b>${own}票</b></div>` : "") +
+      voted.map(([t, n]) => `<div class="other-row"><span>${esc(t)}</span><b>${n}票</b></div>`).join("");
+    const det = document.getElementById("otherDetails");
+    det.style.display = rest.length ? "" : "none";
+    document.getElementById("otherRest").innerHTML = rest.map((t) => `<div>${esc(t)}</div>`).join("");
+  }
+
+  document.getElementById("voteList").addEventListener("click", (e) => {
+    const b = e.target.closest(".vote-opt");
+    if (!b) return;
+    const topic = b.dataset.topic;
+    const prev = myVote;
+    myVote = topic;
+    renderTeamTopic();
+    if (!NAC.send({ type: "vote", topic })) {
+      myVote = prev;
+      renderTeamTopic();
+      statusEl.textContent = "つながっていないため投票できませんでした。もう一度タップしてください";
+    }
+  });
 
   // --- T-shirt slider: auto-rotates through the product photos, whole image
   // links to the shop. Dots are just visual indicators, not clickable. ---

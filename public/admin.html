@@ -166,9 +166,26 @@
       <label for="autoCategorySelect">自動／今すぐシャッフルで使うカテゴリ:</label>
       <select id="autoCategorySelect"><option value="all">すべてのカテゴリからランダム</option></select>
     </div>
+    <div class="toggle-row">
+      <input type="checkbox" id="voteOnShuffleToggle" checked />
+      <label for="voteOnShuffleToggle">シャッフルのたびに、チームごとにテーマ投票を行う（OFFなら従来どおりランダムで1題）</label>
+    </div>
     <div class="controls">
       <button class="primary" id="shuffleNowBtn">🔀 今すぐ全員シャッフル</button>
     </div>
+  </div>
+
+  <h2 class="section">テーマ投票（チームごと）</h2>
+  <div class="card">
+    <div class="controls">
+      <button class="primary" id="startVoteBtn">🗳 チームでテーマ投票を開始</button>
+      <button class="ghost" id="endVoteBtn">投票を今すぐ締め切る</button>
+    </div>
+    <div class="info-sub" style="font-size:0.75rem; color:#999; margin:0 0 8px;">
+      今のチーム分けのまま、全テーマを選択肢にして各チームで投票します。チームの最初の1票から60秒、または全員が投票した時点で決定。
+      票が最多のテーマがそのチームのテーマになり、同数ならランダム。誰も投票しなければ2分後にランダムで決まります。
+    </div>
+    <div id="voteStatus" style="font-size:0.88rem; line-height:1.8;"></div>
   </div>
 
   <h2 class="section">グループ設定</h2>
@@ -200,7 +217,7 @@
 
 
   <table>
-    <thead><tr><th>カード</th><th>気分</th><th>チーム</th><th>状態</th><th>移動</th></tr></thead>
+    <thead><tr><th>カード</th><th>気分</th><th>チーム</th><th>投票</th><th>状態</th><th>移動</th></tr></thead>
     <tbody id="roster"></tbody>
   </table>
 
@@ -349,6 +366,11 @@
     }
   });
   document.getElementById("shuffleNowBtn").addEventListener("click", () => { adminInitiatedChange = true; sendMsg({ type: "shuffleNow" }); });
+  document.getElementById("voteOnShuffleToggle").addEventListener("change", (e) => sendMsg({ type: "setVoteOnShuffle", value: e.target.checked }));
+  document.getElementById("startVoteBtn").addEventListener("click", () => {
+    if (confirm("今のチーム分けのまま、全員にテーマ投票を開始します。今のテーマは消えます。よろしいですか？")) { adminInitiatedChange = true; sendMsg({ type: "startVote" }); }
+  });
+  document.getElementById("endVoteBtn").addEventListener("click", () => sendMsg({ type: "endVoteNow" }));
   document.getElementById("autoToggle").addEventListener("change", (e) => sendMsg({ type: "toggleAuto", enabled: e.target.checked }));
 
   document.getElementById("addTimeBtn").addEventListener("click", () => {
@@ -390,6 +412,33 @@
     return p.active ? `⚪ 切断中 ${fmtAge(age)}` : `💤 離脱 ${fmtAge(age)}`;
   }
 
+  let lastVotes = {};
+  let lastAdminState = null;
+  setInterval(() => { if (lastAdminState) renderVoteStatus(lastAdminState); }, 1000);
+  function voteCell(p) {
+    const tv = p.group ? lastVotes[p.group] : null;
+    if (!tv) return "-";
+    if (tv.phase === "decided") return "—";
+    return p.voted ? "✅" : "…";
+  }
+
+  function renderVoteStatus(state) {
+    const el = document.getElementById("voteStatus");
+    const tvs = state.teamVotes || {};
+    const names = Object.keys(tvs).sort();
+    if (names.length === 0) { el.textContent = "（投票は行われていません）"; return; }
+    el.innerHTML = names.map((t) => {
+      const v = tvs[t];
+      const top = Object.entries(v.tally || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
+        .map(([k, n]) => `${k.replace(/</g, "&lt;")} (${n})`).join(" / ");
+      if (v.phase === "voting") {
+        const left = v.deadline ? Math.max(0, Math.ceil((v.deadline - (Date.now() + (state.serverNow - rosterReceivedAt))) / 1000)) : null;
+        return `<div><b>チーム${t}</b> 🗳 投票中 ${v.voted}/${v.members}人 ${left === null ? "（まだ誰も投票していません）" : `（残り約${left}秒）`}<br><span style="color:#888;font-size:0.8rem;">${top || ""}</span></div>`;
+      }
+      return `<div><b>チーム${t}</b> ✅ 決定: ${(v.topic || "-").replace(/</g, "&lt;")}${v.noVotes ? "（無投票のためランダム）" : ""}<br><span style="color:#888;font-size:0.8rem;">${top}</span></div>`;
+    }).join("");
+  }
+
   function renderRoster() {
     rosterEl.innerHTML = "";
     for (const person of currentRoster) {
@@ -402,6 +451,7 @@
         <td>${cardHtml(person)}</td>
         <td>${VIBE_LABELS[person.vibe] || "-"}</td>
         <td>${person.group || "-"}</td>
+        <td>${voteCell(person)}</td>
         <td class="status-cell">${statusText(person)}</td>
         <td><select class="move-select" data-token="${person.token}">${options}</select></td>
       `;
@@ -463,16 +513,29 @@
     currentSchedule = state.schedule || [];
 
     const qDisplay = document.getElementById("currentQDisplay");
-    if (state.question && state.question.length > 0) {
+    const tvNames = Object.keys(state.teamVotes || {}).sort();
+    if (tvNames.length > 0) {
+      qDisplay.innerHTML = tvNames.map((t) => {
+        const v = state.teamVotes[t];
+        const txt = v.phase === "decided" ? (v.topic || "-") : "投票中…";
+        return `<div><b>${t}</b>: ${txt.replace(/</g, "&lt;")}</div>`;
+      }).join("");
+      qDisplay.classList.remove("empty");
+    } else if (state.question && state.question.length > 0) {
       qDisplay.textContent = state.question;
       qDisplay.classList.remove("empty");
     } else {
       qDisplay.textContent = "（まだ設定されていません）";
       qDisplay.classList.add("empty");
     }
-    document.getElementById("currentCatDisplay").textContent = state.category ? `カテゴリ: ${state.category}` : (state.question ? "カテゴリ: オリジナル" : "");
+    document.getElementById("currentCatDisplay").textContent = tvNames.length > 0 ? "チームごとの投票で決定" : (state.category ? `カテゴリ: ${state.category}` : (state.question ? "カテゴリ: オリジナル" : ""));
 
     document.getElementById("autoToggle").checked = !!state.autoEnabled;
+    document.getElementById("voteOnShuffleToggle").checked = !!state.voteOnShuffle;
+    lastVotes = state.teamVotes || {};
+    rosterReceivedAt = Date.now();
+    lastAdminState = state;
+    renderVoteStatus(state);
 
     const eventOverStatus = document.getElementById("eventOverStatus");
     const eventOverBtn = document.getElementById("eventOverBtn");

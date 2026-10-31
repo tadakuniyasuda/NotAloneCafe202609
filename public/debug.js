@@ -167,8 +167,12 @@
         if (view && (view.vibe || null) !== (d.you.vibe || null)) mismatches.push(`気分: 画面=${view.vibe || "なし"} / サーバー=${d.you.vibe || "なし"}`);
       }
     }
-    if (view && view.question !== undefined && d.question !== undefined && view.question !== d.question) {
-      mismatches.push(`テーマ: 画面="${view.question}" / サーバー="${d.question}"`);
+    const srvQ = d.shownQuestion !== undefined ? d.shownQuestion : d.question;
+    if (view && view.question !== undefined && srvQ !== undefined && view.question !== srvQ) {
+      mismatches.push(`テーマ: 画面="${view.question}" / サーバー="${srvQ}"`);
+    }
+    if (stats.role === "player" && d.you && d.you.tokenKnown && view && view.vote !== undefined && (view.vote || null) !== (d.you.vote || null)) {
+      mismatches.push(`投票: 画面="${view.vote || "なし"}" / サーバー="${d.you.vote || "なし"}"`);
     }
     const summary = `v=${stats.lastV}/${d.stateVersion} group=${view && view.group !== undefined ? view.group : "-"}/${d.you && d.you.group !== undefined ? d.you.group : "-"} ghosts=${d.ghosts} sockets=${d.openSockets} up=${d.uptimeSec}s`;
     if (mismatches.length) {

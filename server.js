@@ -143,6 +143,20 @@ let eventWindow = { start: "14:00", end: "17:00" };
 let eventOver = false; // admin-set "Event over" state — replaces the player's welcome message
 const usedTopics = new Set(); // topics already shown this event (random picks avoid repeats)
 
+// ---- Topic voting (per team) ----
+// A round starts after a shuffle (if voteOnShuffle) or when admin presses
+// 「チームでトピック投票」. Every player may cast ONE vote (they can change it until
+// their team is decided). A team's countdown starts at ITS first vote and lasts
+// VOTE_WAIT_MS; the team is decided earlier if every active member has voted.
+// If nobody in a team votes at all, VOTE_IDLE_MS after the round start the server
+// picks a random topic for that team so nobody is left waiting forever.
+const VOTE_WAIT_MS = Number(process.env.VOTE_WAIT_MS) || 60 * 1000;
+const VOTE_IDLE_MS = Number(process.env.VOTE_IDLE_MS) || 120 * 1000;
+let voteOnShuffle = true;   // default: scheduled / "shuffle now" rounds are voted
+let voteRound = 0;
+const ballots = new Map();  // token -> topic text (this round)
+let teamVotes = {};         // team -> { phase:"voting"|"decided", deadline, idleDeadline, topic, category, tally, voted, members }
+
 // Schedule: list of { id, time: "HH:MM", fired: boolean }. Admin-editable.
 let schedule = [
   { id: "s1", time: "15:00", fired: false },
@@ -361,6 +375,136 @@ function applyPickedTopic(pick) {
   usedTopics.add(pick.text);
 }
 
+// ---- Voting logic ----
+function allTopics() {
+  const out = [];
+  for (const cat of TOPIC_CATEGORIES) for (const t of cat.topics) out.push(t);
+  return out;
+}
+
+function teamMembers(team) {
+  return activeAttendees().filter(([, c]) => c.group === team);
+}
+
+function liveTally(team) {
+  const tally = {};
+  let voted = 0;
+  const members = teamMembers(team);
+  for (const [token] of members) {
+    const b = ballots.get(token);
+    if (b) { tally[b] = (tally[b] || 0) + 1; voted++; }
+  }
+  return { tally, voted, members: members.length };
+}
+
+function clearVotes() {
+  ballots.clear();
+  teamVotes = {};
+}
+
+function ensureTeamVote(team) {
+  if (!team || teamVotes[team]) return;
+  if (Object.keys(teamVotes).length === 0) return; // no round is running
+  teamVotes[team] = { phase: "voting", deadline: null, idleDeadline: Date.now() + VOTE_IDLE_MS };
+}
+
+function startVote() {
+  clearVotes();
+  voteRound++;
+  currentQuestion = "";
+  currentCategory = "";
+  eventOver = false;
+  const now = Date.now();
+  for (const t of activeTeams()) {
+    if (teamMembers(t).length > 0) {
+      teamVotes[t] = { phase: "voting", deadline: null, idleDeadline: now + VOTE_IDLE_MS };
+    }
+  }
+}
+
+function decideTeam(team) {
+  const tv = teamVotes[team];
+  if (!tv || tv.phase !== "voting") return false;
+  const { tally, voted, members } = liveTally(team);
+  let topic = "";
+  const entries = Object.entries(tally);
+  if (entries.length > 0) {
+    const max = Math.max(...entries.map(([, n]) => n));
+    const tied = entries.filter(([, n]) => n === max).map(([t]) => t);
+    topic = tied[Math.floor(Math.random() * tied.length)];
+  } else {
+    const pick = pickTopic(autoCategory);
+    topic = pick ? pick.text : "";
+  }
+  const cat = topic ? categoryOfTopic(topic) : null;
+  if (topic) usedTopics.add(topic);
+  teamVotes[team] = {
+    phase: "decided", topic, category: cat ? cat.name : "",
+    tally, voted, members, noVotes: entries.length === 0, decidedAt: Date.now(),
+  };
+  return true;
+}
+
+// Decide every team whose vote is complete or out of time. Returns true if any changed.
+function checkVotes(force = false) {
+  const now = Date.now();
+  let changed = false;
+  for (const team of Object.keys(teamVotes)) {
+    const tv = teamVotes[team];
+    if (tv.phase !== "voting") continue;
+    const { voted, members } = liveTally(team);
+    const allIn = members > 0 && voted >= members;
+    const timeUp = tv.deadline ? now >= tv.deadline : now >= tv.idleDeadline;
+    if (force || allIn || timeUp) { if (decideTeam(team)) changed = true; }
+  }
+  return changed;
+}
+
+function castVote(token, topic) {
+  const c = clients.get(token);
+  if (!c || !isAttendee(c) || !c.group) return false;
+  if (typeof topic !== "string" || !allTopics().includes(topic)) return false;
+  ensureTeamVote(c.group);
+  const tv = teamVotes[c.group];
+  if (!tv || tv.phase !== "voting") return false;
+  ballots.set(token, topic);
+  if (!tv.deadline) tv.deadline = Date.now() + VOTE_WAIT_MS; // first vote starts the countdown
+  checkVotes();
+  return true;
+}
+
+function publicVotes() {
+  const out = {};
+  for (const [team, tv] of Object.entries(teamVotes)) {
+    if (tv.phase === "voting") {
+      const { tally, voted, members } = liveTally(team);
+      out[team] = { phase: "voting", deadline: tv.deadline, idleDeadline: tv.idleDeadline, tally, voted, members };
+    } else {
+      out[team] = {
+        phase: "decided", topic: tv.topic, category: tv.category, tally: tv.tally,
+        voted: tv.voted, members: tv.members, noVotes: !!tv.noVotes,
+      };
+    }
+  }
+  return out;
+}
+
+// A normal "new round": reshuffle, then either open a vote or pick one random topic.
+function runRound() {
+  eventOver = false;
+  if (voteOnShuffle) {
+    clearVotes();
+    currentQuestion = "";
+    currentCategory = "";
+    shuffleAll();
+    startVote();
+  } else {
+    clearVotes();
+    applyPickedTopic(pickTopic(autoCategory));
+    shuffleAll();
+  }
+}
+
 // One greedy attempt: take the people in the given order and put each into the
 // active team (among those not yet at capacity) where they'd create the fewest
 // repeat pairings with people already placed there. Returns the teams and the
@@ -473,6 +617,10 @@ function publicState() {
     eventWindow,
     eventOver,
     nextEvent: NEXT_EVENT,
+    serverNow: Date.now(),
+    voteRound,
+    teamVotes: publicVotes(),
+    topicCategories: TOPIC_CATEGORIES,
   };
 }
 
@@ -489,6 +637,7 @@ function adminState() {
       vibe: c.vibe,
       connected: c.connected,
       active: isActive(c),
+      voted: ballots.has(token),
       silentSec: Math.round((Date.now() - (c.lastSeen || 0)) / 1000),
     }));
   return {
@@ -496,6 +645,7 @@ function adminState() {
     type: "adminState",
     topicCategories: TOPIC_CATEGORIES,
     autoCategory,
+    voteOnShuffle,
     usedTopics: [...usedTopics],
     roster,
   };
@@ -503,11 +653,14 @@ function adminState() {
 
 function broadcastState() {
   stateVersion++;
-  const pub = JSON.stringify(publicState());
+  const pubObj = publicState();
+  const pub = JSON.stringify(pubObj);
   const adm = JSON.stringify(adminState());
-  for (const c of clients.values()) {
+  for (const [token, c] of clients.entries()) {
     if (!c.connected || c.ws.readyState !== WebSocket.OPEN) continue;
-    c.ws.send(c.isAdmin ? adm : pub);
+    if (c.isAdmin) c.ws.send(adm);
+    else if (isAttendee(c)) c.ws.send(JSON.stringify({ ...pubObj, myVote: ballots.get(token) || null }));
+    else c.ws.send(pub);
   }
 }
 
@@ -553,6 +706,16 @@ function debugInfo(ws, token) {
     question: currentQuestion,
     category: currentCategory,
     eventOver,
+    voteRound,
+    // What THIS phone should be showing as its topic (its team's voted topic if there is one).
+    shownQuestion: (() => {
+      const m = token ? clients.get(token) : null;
+      const tv = m && m.group ? teamVotes[m.group] : null;
+      if (tv && tv.phase === "decided") return tv.topic || currentQuestion;
+      if (tv && tv.phase === "voting") return "";
+      return currentQuestion;
+    })(),
+    teamPhases: Object.fromEntries(Object.entries(teamVotes).map(([t, v]) => [t, v.phase])),
     connId: ws.connId,
     openSockets: open,
     registeredAttendees: regs.length,
@@ -566,6 +729,7 @@ function debugInfo(ws, token) {
           tag: me.tag,
           group: me.group,
           vibe: me.vibe,
+          vote: ballots.get(token) || null,
           connectedFlag: me.connected,
           thisSocketIsRegistered: me.ws === ws,
         }
@@ -702,7 +866,7 @@ wss.on("connection", (ws, req) => {
       // This socket just proved it is alive: make sure the server agrees.
       if (c.ws !== ws || !c.connected) { c.ws = ws; c.connected = true; }
       sendWelcome(ws, token, { resync: true });
-      send(ws, publicState());
+      send(ws, { ...publicState(), myVote: ballots.get(token) || null });
       return;
     }
 
@@ -712,8 +876,15 @@ wss.on("connection", (ws, req) => {
       c.vibe = msg.vibe || null;
       c.group = null;
       c.group = assignTeam();
+      ensureTeamVote(c.group);
       sendAssigned(c);
       broadcastState();
+      return;
+    }
+
+    if (msg.type === "vote" && token) {
+      castVote(token, msg.topic);
+      broadcastState(); // also re-sends the player's own choice even if it was refused
       return;
     }
   });
@@ -736,6 +907,7 @@ function handleAdminMessage(msg) {
     const c = clients.get(msg.token);
     if (c && isAttendee(c) && ALL_TEAMS.includes(msg.toGroup)) {
       c.group = msg.toGroup;
+      ensureTeamVote(c.group);
       // Push the change directly to that person's own phone.
       sendAssigned(c);
       broadcastState();
@@ -759,6 +931,7 @@ function handleAdminMessage(msg) {
     }
     recordPairings(teamsMap);
     eventOver = false;
+    clearVotes(); // teams changed, so any earlier vote results no longer match the members
     for (const [, c] of joined) sendAssigned(c);
     broadcastState();
     return;
@@ -771,6 +944,7 @@ function handleAdminMessage(msg) {
   }
 
   if (msg.type === "setQuestion" && typeof msg.text === "string") {
+    clearVotes();
     currentQuestion = msg.text.trim();
     // If this is one of the listed topics, remember its category and count it as
     // used. Custom text (or Clear) has no category.
@@ -785,6 +959,7 @@ function handleAdminMessage(msg) {
   }
 
   if (msg.type === "randomTopic") {
+    clearVotes();
     const pick = pickTopic(typeof msg.category === "string" ? msg.category : "all");
     applyPickedTopic(pick);
     eventOver = false;
@@ -807,9 +982,29 @@ function handleAdminMessage(msg) {
   }
 
   if (msg.type === "shuffleNow") {
-    applyPickedTopic(pickTopic(autoCategory));
-    eventOver = false;
-    shuffleAll();
+    runRound();
+    broadcastState();
+    return;
+  }
+
+  // Start a topic vote with the teams exactly as they are now (no reshuffle).
+  if (msg.type === "startVote") {
+    startVote();
+    // Tell phones right away (sound + screen); the state broadcast carries the vote itself.
+    for (const [, c] of activeAttendees()) if (c.group) sendAssigned(c);
+    broadcastState();
+    return;
+  }
+
+  // Close the vote now: every team still voting is decided with what it has.
+  if (msg.type === "endVoteNow") {
+    checkVotes(true);
+    broadcastState();
+    return;
+  }
+
+  if (msg.type === "setVoteOnShuffle" && typeof msg.value === "boolean") {
+    voteOnShuffle = msg.value;
     broadcastState();
     return;
   }
@@ -848,6 +1043,8 @@ function handleAdminMessage(msg) {
     currentQuestion = "";
     currentCategory = "";
     eventOver = false;
+    clearVotes();
+    voteRound = 0;
     pairHistory.clear();
     usedTopics.clear();
     schedule = schedule.map((s) => ({ ...s, fired: false }));
@@ -871,13 +1068,17 @@ setInterval(() => {
   for (const item of schedule) {
     if (!item.fired && item.time === nowJst) {
       item.fired = true;
-      applyPickedTopic(pickTopic(autoCategory));
-      shuffleAll();
+      runRound();
       fired = true;
     }
   }
   if (fired) broadcastState();
 }, 15000);
+
+// Vote timer: four times a second, close any team vote that is complete or out of time.
+setInterval(() => {
+  if (checkVotes()) broadcastState();
+}, 250);
 
 // Heartbeat: every 10 s ping every socket (browsers answer automatically) and
 // terminate any that did not answer since the last round, then send an app-level
