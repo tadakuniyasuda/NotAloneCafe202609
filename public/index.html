@@ -176,6 +176,14 @@
   }
   .link-list-note:not(:last-child) { border-bottom: 1px solid #f0f0f0; }
 
+  .event-posters { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+  .event-posters a { display: block; line-height: 0; }
+  .event-posters img {
+    width: 100%; height: auto; display: block;
+    border-radius: 12px; border: 1px solid #f0e4e8;
+  }
+  .event-posters-note { font-size: 0.72rem; color: #999; margin-top: 8px; line-height: 1.5; }
+
   .tshirt-slider {
     position: relative;
     width: 100%;
@@ -252,7 +260,12 @@
   <footer class="info-footer">
     <div class="info-card">
       <div class="info-title">次回のお知らせ</div>
-      <div class="info-main" id="nextEventMain">次回は12月6日（日）14:00〜17:00<br>九州男で開催！</div>
+      <div class="info-main" id="nextEventMain">次回は12月6日（日）14:00〜16:00<br>九州男で開催！</div>
+      <div class="event-posters">
+        <a href="/img/dec6_nac_1.png" target="_blank" rel="noopener"><img src="/img/dec6_nac_1.png" alt="12月6日 学習会のチラシ（1枚目）" loading="lazy" /></a>
+        <a href="/img/dec6_nac_2.png" target="_blank" rel="noopener"><img src="/img/dec6_nac_2.png" alt="12月6日 学習会のチラシ（2枚目）" loading="lazy" /></a>
+      </div>
+      <div class="event-posters-note">画像をタップすると大きく表示されます。</div>
     </div>
 
     <div class="info-card">
@@ -272,7 +285,7 @@
 
     <div class="info-card">
       <div class="info-title">アンケート</div>
-      <div class="info-main"><a href="https://docs.google.com/forms/d/e/1FAIpQLSdHio_Uw9qAVaGpSHqAwSwckm50Gc6G0uIRmTgctMbUSUzz_w/viewform?usp=publish-editor" target="_blank" rel="noopener">アンケートにご協力をお願いします。</a></div>
+      <div class="info-main"><a href="https://forms.gle/nZmwYio9r27S4x6J7" target="_blank" rel="noopener">アンケートにご協力をお願いします。</a></div>
     </div>
 
     <div class="info-card">
@@ -322,7 +335,7 @@
   let lastCategory = "";
   let myCard = "";
   // Shown until the first message arrives; the server's NEXT_EVENT (server.js) then replaces it.
-  let nextEvent = { date: "12月6日（日）", time: "14:00〜17:00", place: "九州男" };
+  let nextEvent = { date: "12月6日（日）", time: "14:00〜16:00", place: "九州男" };
 
   const vibeNameFor = { yellow: "イェロー", pink: "ピンク", green: "グリーン", blue: "ブルー" };
   const vibeImgFor = { yellow: "/img/yellow.png", pink: "/img/pink.png", green: "/img/green.png", blue: "/img/blue.png" };
