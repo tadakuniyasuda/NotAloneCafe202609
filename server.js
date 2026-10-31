@@ -42,7 +42,7 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 // ---- player footer, the display screen and the "event over" message all
 // ---- update from this one place. (The HTML files only hold a fallback copy
 // ---- that shows for a moment before the first connection.)
-const NEXT_EVENT = { date: "12月6日（日）", time: "14:00〜17:00", place: "九州男" };
+const NEXT_EVENT = { date: "12月6日（日）", time: "14:00〜16:00", place: "九州男" };
 
 const ALL_TEAMS = ["A", "B", "C", "D"];
 const TEAM_LABELS = { A: "チームA", B: "チームB", C: "チームC", D: "チームD" };
