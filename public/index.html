@@ -176,13 +176,12 @@
   }
   .link-list-note:not(:last-child) { border-bottom: 1px solid #f0f0f0; }
 
-  .event-posters { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
-  .event-posters a { display: block; line-height: 0; }
-  .event-posters img {
-    width: 100%; height: auto; display: block;
-    border-radius: 12px; border: 1px solid #f0e4e8;
-  }
-  .event-posters-note { font-size: 0.72rem; color: #999; margin-top: 8px; line-height: 1.5; }
+  .event-text p { margin: 0 0 10px; }
+  .event-text .event-head { font-weight: 700; font-size: 1rem; }
+  .event-text .event-when { font-weight: 700; color: #2F6F9B; line-height: 1.7; }
+  .event-text .event-quotes { margin: 0 0 10px; padding-left: 1.2em; }
+  .event-text .event-quotes li { margin: 2px 0; }
+  .event-text .event-note { color: #666; font-size: 0.85rem; margin-bottom: 0; }
 
   .tshirt-slider {
     position: relative;
@@ -260,12 +259,20 @@
   <footer class="info-footer">
     <div class="info-card">
       <div class="info-title">次回のお知らせ</div>
-      <div class="info-main" id="nextEventMain">次回は12月6日（日）14:00〜16:00<br>九州男で開催！</div>
-      <div class="event-posters">
-        <a href="/img/dec6_nac_1.png" target="_blank" rel="noopener"><img src="/img/dec6_nac_1.png" alt="12月6日 学習会のチラシ（1枚目）" loading="lazy" /></a>
-        <a href="/img/dec6_nac_2.png" target="_blank" rel="noopener"><img src="/img/dec6_nac_2.png" alt="12月6日 学習会のチラシ（2枚目）" loading="lazy" /></a>
+      <!-- Wording is fixed text on purpose (the poster images are still being decided). -->
+      <div class="info-main event-text">
+        <p class="event-head">🌈 次回のNot Alone Cafeのお知らせ</p>
+        <p class="event-when">📅 12月6日（日）14:00〜16:00<br>📍 九州男（KUSUO）</p>
+        <p>次回は、いつもの交流会とは少し趣向を変えて、日本の入管制度や在留資格について学ぶ特別な会を予定しています！</p>
+        <ul class="event-quotes">
+          <li>「これからも日本で暮らしていきたい」</li>
+          <li>「在留資格について知っておきたい」</li>
+          <li>「同性パートナーと日本で暮らすには？」</li>
+        </ul>
+        <p>そんな疑問について、専門家をお招きして一緒に学ぶ機会を準備しています。</p>
+        <p>🌍 外国籍のLGBTQ+の方をはじめ、関心のある皆さんを歓迎します。</p>
+        <p class="event-note">現在、内容を最終調整中です。詳しいご案内は改めてお知らせします。<br>ぜひ楽しみにしていてください！🌈</p>
       </div>
-      <div class="event-posters-note">画像をタップすると大きく表示されます。</div>
     </div>
 
     <div class="info-card">
@@ -364,10 +371,9 @@
     el.innerHTML = `<span>あなたのカード</span><span class="face${red ? " red" : ""}">${myCard}</span>`;
   }
 
-  function renderNextEvent() {
-    const el = document.getElementById("nextEventMain");
-    if (el) el.innerHTML = `次回は${nextEvent.date}${nextEvent.time}<br>${nextEvent.place}で開催！`;
-  }
+  // The next-event card is fixed text in the HTML; nextEvent (from the server) is
+  // still used by the "event over" message further down.
+  function renderNextEvent() {}
 
   // ---- messages from the server ----
   function handleMessage(msg) {
